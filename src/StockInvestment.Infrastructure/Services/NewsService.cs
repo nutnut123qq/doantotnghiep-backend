@@ -1,39 +1,64 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
-using StockInvestment.Domain.Enums;
+using StockInvestment.Infrastructure.Data;
 
 namespace StockInvestment.Infrastructure.Services;
 
 public class NewsService : INewsService
 {
     private readonly ILogger<NewsService> _logger;
-    private readonly List<News> _mockNews;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ApplicationDbContext _context;
 
-    public NewsService(ILogger<NewsService> logger)
+    public NewsService(
+        ILogger<NewsService> logger,
+        IUnitOfWork unitOfWork,
+        ApplicationDbContext context)
     {
         _logger = logger;
-        _mockNews = GenerateMockNews();
+        _unitOfWork = unitOfWork;
+        _context = context;
     }
 
-    public Task<IEnumerable<News>> GetNewsAsync(int page = 1, int pageSize = 20, Guid? tickerId = null)
+    public async Task<IEnumerable<News>> GetNewsAsync(int page = 1, int pageSize = 20, Guid? tickerId = null)
     {
-        var result = _mockNews.AsEnumerable();
-
-        if (tickerId.HasValue)
+        try
         {
-            result = result.Where(n => n.TickerId == tickerId.Value);
+            var query = _context.News.AsQueryable();
+
+            if (tickerId.HasValue)
+            {
+                query = query.Where(n => n.TickerId == tickerId.Value);
+            }
+
+            var news = await query
+                .OrderByDescending(n => n.PublishedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return news;
         }
-
-        result = result.Skip((page - 1) * pageSize).Take(pageSize);
-
-        return Task.FromResult(result);
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching news from database");
+            return Enumerable.Empty<News>();
+        }
     }
 
-    public Task<News?> GetNewsByIdAsync(Guid id)
+    public async Task<News?> GetNewsByIdAsync(Guid id)
     {
-        var news = _mockNews.FirstOrDefault(n => n.Id == id);
-        return Task.FromResult(news);
+        try
+        {
+            return await _unitOfWork.Repository<News>().GetByIdAsync(id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching news {Id} from database", id);
+            return null;
+        }
     }
 
     public Task RequestSummarizationAsync(Guid newsId)
@@ -42,36 +67,48 @@ public class NewsService : INewsService
         return Task.CompletedTask;
     }
 
-    private List<News> GenerateMockNews()
+    public async Task<News> AddNewsAsync(News news)
     {
-        var news = new List<News>();
-        var random = new Random();
-
-        var titles = new[]
+        try
         {
-            "Company announces strong quarterly earnings",
-            "New product launch expected to boost sales",
-            "Market analysts upgrade stock rating",
-            "Partnership agreement signed with major retailer",
-            "Regulatory approval received for new facility",
-        };
-
-        var sources = new[] { "VNExpress", "CafeF", "VietStock", "Investing.com" };
-
-        for (int i = 0; i < 20; i++)
-        {
-            news.Add(new News
-            {
-                Id = Guid.NewGuid(),
-                Title = titles[random.Next(titles.Length)],
-                Content = $"This is a sample news article content. {titles[random.Next(titles.Length)]}",
-                Source = sources[random.Next(sources.Length)],
-                PublishedAt = DateTime.UtcNow.AddDays(-random.Next(0, 30)),
-                CreatedAt = DateTime.UtcNow.AddDays(-random.Next(0, 30)),
-            });
+            await _unitOfWork.Repository<News>().AddAsync(news);
+            await _unitOfWork.SaveChangesAsync();
+            return news;
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding news to database");
+            throw;
+        }
+    }
 
-        return news;
+    public async Task<IEnumerable<News>> AddNewsRangeAsync(IEnumerable<News> newsList)
+    {
+        try
+        {
+            await _unitOfWork.Repository<News>().AddRangeAsync(newsList);
+            await _unitOfWork.SaveChangesAsync();
+            return newsList;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding news range to database");
+            throw;
+        }
+    }
+
+    public async Task UpdateNewsAsync(News news)
+    {
+        try
+        {
+            await _unitOfWork.Repository<News>().UpdateAsync(news);
+            await _unitOfWork.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating news {Id}", news.Id);
+            throw;
+        }
     }
 }
 

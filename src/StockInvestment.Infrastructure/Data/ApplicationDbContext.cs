@@ -18,6 +18,14 @@ public class ApplicationDbContext : DbContext
     public DbSet<FinancialReport> FinancialReports { get; set; } = null!;
     public DbSet<Layout> Layouts { get; set; } = null!;
     public DbSet<TechnicalIndicator> TechnicalIndicators { get; set; } = null!;
+    public DbSet<UserPreference> UserPreferences { get; set; } = null!;
+    public DbSet<CorporateEvent> CorporateEvents { get; set; } = null!;
+    public DbSet<AnalyticsEvent> AnalyticsEvents { get; set; } = null!;
+    public DbSet<DataSource> DataSources { get; set; } = null!;
+    public DbSet<AIModelConfig> AIModelConfigs { get; set; } = null!;
+    public DbSet<AIModelPerformance> AIModelPerformances { get; set; } = null!;
+    public DbSet<NotificationTemplate> NotificationTemplates { get; set; } = null!;
+    public DbSet<PushNotificationConfig> PushNotificationConfigs { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -60,6 +68,37 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<FinancialReport>().ToTable("FinancialReports");
         modelBuilder.Entity<Layout>().ToTable("Layouts");
         modelBuilder.Entity<TechnicalIndicator>().ToTable("TechnicalIndicators");
+        modelBuilder.Entity<UserPreference>().ToTable("UserPreferences");
+        modelBuilder.Entity<DataSource>().ToTable("DataSources");
+        modelBuilder.Entity<AIModelConfig>().ToTable("AIModelConfigs");
+        modelBuilder.Entity<AIModelPerformance>().ToTable("AIModelPerformances");
+        modelBuilder.Entity<NotificationTemplate>().ToTable("NotificationTemplates");
+        modelBuilder.Entity<PushNotificationConfig>().ToTable("PushNotificationConfigs");
+
+        // Configure CorporateEvent inheritance (TPH - Table Per Hierarchy)
+        modelBuilder.Entity<CorporateEvent>()
+            .ToTable("CorporateEvents")
+            .HasDiscriminator<CorporateEventType>("EventType")
+            .HasValue<EarningsEvent>(CorporateEventType.Earnings)
+            .HasValue<DividendEvent>(CorporateEventType.Dividend)
+            .HasValue<StockSplitEvent>(CorporateEventType.StockSplit)
+            .HasValue<AGMEvent>(CorporateEventType.AGM)
+            .HasValue<RightsIssueEvent>(CorporateEventType.RightsIssue);
+
+        // Configure CorporateEvent indexes
+        modelBuilder.Entity<CorporateEvent>()
+            .HasIndex(e => e.StockTickerId);
+        
+        modelBuilder.Entity<CorporateEvent>()
+            .HasIndex(e => e.EventDate);
+        
+        modelBuilder.Entity<CorporateEvent>()
+            .HasIndex(e => new { e.StockTickerId, e.EventDate });
+
+        // Configure UserPreference indexes
+        modelBuilder.Entity<UserPreference>()
+            .HasIndex(p => new { p.UserId, p.PreferenceKey })
+            .IsUnique();
     }
 }
 

@@ -60,7 +60,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.WithOrigins("http://localhost:3000")
+        policy.WithOrigins("http://localhost:3000", "http://localhost:5173")
               .AllowAnyMethod()
               .AllowAnyHeader()
               .AllowCredentials();
@@ -128,20 +128,60 @@ builder.Services.AddScoped<IUnitOfWork, StockInvestment.Infrastructure.Data.Unit
 
 // Add Repositories
 builder.Services.AddScoped<StockInvestment.Application.Interfaces.IUserRepository, StockInvestment.Infrastructure.Data.Repositories.UserRepository>();
+builder.Services.AddScoped<StockInvestment.Application.Interfaces.IWatchlistRepository, StockInvestment.Infrastructure.Data.Repositories.WatchlistRepository>();
+builder.Services.AddScoped<StockInvestment.Application.Interfaces.IAlertRepository, StockInvestment.Infrastructure.Data.Repositories.AlertRepository>();
+builder.Services.AddScoped<StockInvestment.Application.Interfaces.IUserPreferenceRepository, StockInvestment.Infrastructure.Data.Repositories.UserPreferenceRepository>();
+builder.Services.AddScoped<StockInvestment.Application.Interfaces.ICorporateEventRepository, StockInvestment.Infrastructure.Data.Repositories.CorporateEventRepository>();
+builder.Services.AddScoped<StockInvestment.Application.Interfaces.IDataSourceRepository, StockInvestment.Infrastructure.Data.Repositories.DataSourceRepository>();
 builder.Services.AddScoped(typeof(IRepository<>), typeof(StockInvestment.Infrastructure.Data.Repositories.Repository<>));
 
 // Add Application Services
 builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
+builder.Services.AddScoped<IVNStockService, VNStockService>();
 builder.Services.AddScoped<IStockDataService, StockDataService>();
 builder.Services.AddScoped<INewsService, NewsService>();
+builder.Services.AddScoped<INewsCrawlerService, NewsCrawlerService>();
+builder.Services.AddScoped<IFinancialReportService, FinancialReportService>();
+builder.Services.AddScoped<IFinancialReportCrawlerService, FinancialReportCrawlerService>();
+builder.Services.AddScoped<IEventCrawlerService, EventCrawlerService>();
 builder.Services.AddScoped<IAIService, AIServiceClient>();
+builder.Services.AddScoped<ITechnicalIndicatorService, TechnicalIndicatorService>();
+builder.Services.AddScoped<IAdminService, AdminService>();
+builder.Services.AddScoped<ISystemHealthService, SystemHealthService>();
+builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
+builder.Services.AddScoped<IDataSourceService, DataSourceService>();
+builder.Services.AddScoped<StockInvestment.Application.Interfaces.IAIModelConfigRepository, StockInvestment.Infrastructure.Data.Repositories.AIModelConfigRepository>();
+builder.Services.AddScoped<IAIModelConfigService, AIModelConfigService>();
+builder.Services.AddScoped<INotificationTemplateService, NotificationTemplateService>();
+builder.Services.AddScoped<IPushNotificationService, PushNotificationService>();
 
 // Configure HTTP Client for AI Service
+builder.Services.AddHttpClient("AIService", client =>
+{
+    var aiServiceUrl = builder.Configuration["AIService:BaseUrl"] ?? "http://localhost:8000";
+    client.BaseAddress = new Uri(aiServiceUrl);
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
 builder.Services.AddHttpClient<AIServiceClient>(client =>
 {
     var aiServiceUrl = builder.Configuration["AIService:Url"] ?? "http://localhost:8000";
     client.BaseAddress = new Uri(aiServiceUrl);
     client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+// Configure HTTP Client for News Crawler
+builder.Services.AddHttpClient("NewsCrawler", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+});
+
+// Configure HTTP Client for Financial Report Crawler
+builder.Services.AddHttpClient("FinancialReportCrawler", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
 });
 
 // Add RabbitMQ connection string
@@ -158,11 +198,23 @@ builder.Services.AddHealthChecks()
         redisConnection,
         name: "redis",
         tags: new[] { "cache", "redis" });
+
+// RabbitMQ temporarily disabled due to version incompatibility
+// TODO: Update RabbitMQ.Client to compatible version
+/*
 builder.Services.AddSingleton<RabbitMQService>(sp =>
 {
     var logger = sp.GetRequiredService<ILogger<RabbitMQService>>();
     return new RabbitMQService(logger, rabbitMQConnection);
 });
+*/
+
+// Add Background Jobs
+builder.Services.AddHostedService<StockInvestment.Infrastructure.BackgroundJobs.StockPriceUpdateJob>();
+builder.Services.AddHostedService<StockInvestment.Infrastructure.BackgroundJobs.AlertMonitorJob>();
+builder.Services.AddHostedService<StockInvestment.Infrastructure.BackgroundJobs.TechnicalIndicatorCalculationJob>();
+builder.Services.AddHostedService<StockInvestment.Infrastructure.BackgroundJobs.NewsCrawlerJob>();
+builder.Services.AddHostedService<StockInvestment.Infrastructure.BackgroundJobs.EventCrawlerJob>();
 
 var app = builder.Build();
 
@@ -203,6 +255,9 @@ app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Analytics middleware
+app.UseAnalytics();
+
 // Map Health Checks endpoint
 app.MapHealthChecks("/health", new HealthCheckOptions
 {
@@ -225,6 +280,7 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions
 
 app.MapControllers();
 app.MapHub<StockPriceHub>("/hubs/stock-price");
+app.MapHub<StockInvestment.Infrastructure.Hubs.TradingHub>("/hubs/trading");
 
 try
 {

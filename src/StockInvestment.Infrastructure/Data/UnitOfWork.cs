@@ -13,6 +13,11 @@ public class UnitOfWork : IUnitOfWork
     private readonly Dictionary<Type, object> _repositories;
     private IDbContextTransaction? _transaction;
     private IUserRepository? _userRepository;
+    private IWatchlistRepository? _watchlistRepository;
+    private IAlertRepository? _alertRepository;
+    private IUserPreferenceRepository? _userPreferenceRepository;
+    private ICorporateEventRepository? _corporateEventRepository;
+    private IDataSourceRepository? _dataSourceRepository;
 
     public UnitOfWork(ApplicationDbContext context)
     {
@@ -26,6 +31,51 @@ public class UnitOfWork : IUnitOfWork
         {
             _userRepository ??= new UserRepository(_context);
             return _userRepository;
+        }
+    }
+
+    public IWatchlistRepository Watchlists
+    {
+        get
+        {
+            _watchlistRepository ??= new WatchlistRepository(_context);
+            return _watchlistRepository;
+        }
+    }
+
+    public IAlertRepository Alerts
+    {
+        get
+        {
+            _alertRepository ??= new AlertRepository(_context);
+            return _alertRepository;
+        }
+    }
+
+    public IUserPreferenceRepository UserPreferences
+    {
+        get
+        {
+            _userPreferenceRepository ??= new UserPreferenceRepository(_context);
+            return _userPreferenceRepository;
+        }
+    }
+
+    public ICorporateEventRepository CorporateEvents
+    {
+        get
+        {
+            _corporateEventRepository ??= new CorporateEventRepository(_context);
+            return _corporateEventRepository;
+        }
+    }
+
+    public IDataSourceRepository DataSources
+    {
+        get
+        {
+            _dataSourceRepository ??= new DataSourceRepository(_context);
+            return _dataSourceRepository;
         }
     }
 

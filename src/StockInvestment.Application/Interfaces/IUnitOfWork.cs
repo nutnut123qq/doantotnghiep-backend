@@ -11,6 +11,31 @@ public interface IUnitOfWork : IDisposable
     IUserRepository Users { get; }
 
     /// <summary>
+    /// Watchlist repository
+    /// </summary>
+    IWatchlistRepository Watchlists { get; }
+
+    /// <summary>
+    /// Alert repository
+    /// </summary>
+    IAlertRepository Alerts { get; }
+
+    /// <summary>
+    /// User Preference repository
+    /// </summary>
+    IUserPreferenceRepository UserPreferences { get; }
+
+    /// <summary>
+    /// Corporate Event repository
+    /// </summary>
+    ICorporateEventRepository CorporateEvents { get; }
+
+    /// <summary>
+    /// Data Source repository
+    /// </summary>
+    IDataSourceRepository DataSources { get; }
+
+    /// <summary>
     /// Generic repository for any entity type
     /// </summary>
     IRepository<T> Repository<T>() where T : class;

@@ -1,49 +1,121 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Domain.Enums;
+using StockInvestment.Infrastructure.Data;
 
 namespace StockInvestment.Infrastructure.Services;
 
 public class StockDataService : IStockDataService
 {
     private readonly ILogger<StockDataService> _logger;
-    private readonly List<StockTicker> _mockTickers;
+    private readonly IVNStockService _vnStockService;
+    private readonly ApplicationDbContext _dbContext;
+    private readonly ICacheService _cacheService;
 
-    public StockDataService(ILogger<StockDataService> logger)
+    public StockDataService(
+        ILogger<StockDataService> logger,
+        IVNStockService vnStockService,
+        ApplicationDbContext dbContext,
+        ICacheService cacheService)
     {
         _logger = logger;
-        _mockTickers = GenerateMockTickers();
+        _vnStockService = vnStockService;
+        _dbContext = dbContext;
+        _cacheService = cacheService;
     }
 
-    public Task<IEnumerable<StockTicker>> GetTickersAsync(string? exchange = null, string? index = null, string? industry = null, Guid? watchlistId = null)
+    public async Task<IEnumerable<StockTicker>> GetTickersAsync(string? exchange = null, string? index = null, string? industry = null, Guid? watchlistId = null)
     {
-        var result = _mockTickers.AsEnumerable();
-
-        if (!string.IsNullOrEmpty(exchange))
+        try
         {
-            var exchangeEnum = Enum.Parse<Exchange>(exchange, true);
-            result = result.Where(t => t.Exchange == exchangeEnum);
-        }
+            // Nếu có watchlistId, lấy từ database
+            if (watchlistId.HasValue)
+            {
+                var watchlist = await _dbContext.Watchlists
+                    .Include(w => w.Tickers)
+                    .FirstOrDefaultAsync(w => w.Id == watchlistId.Value);
 
-        if (!string.IsNullOrEmpty(industry))
+                if (watchlist != null)
+                {
+                    return watchlist.Tickers;
+                }
+            }
+
+            // Lấy từ cache hoặc VNStock API
+            var cacheKey = $"tickers_{exchange}_{industry}";
+            var cachedTickers = await _cacheService.GetAsync<List<StockTicker>>(cacheKey);
+
+            if (cachedTickers != null)
+            {
+                return cachedTickers;
+            }
+
+            // Lấy dữ liệu từ VNStock
+            var tickers = await _vnStockService.GetAllSymbolsAsync(exchange);
+            var tickersList = tickers.ToList();
+
+            // Filter theo industry nếu có
+            if (!string.IsNullOrEmpty(industry))
+            {
+                tickersList = tickersList.Where(t => t.Industry?.Contains(industry, StringComparison.OrdinalIgnoreCase) == true).ToList();
+            }
+
+            // Cache 5 phút
+            await _cacheService.SetAsync(cacheKey, tickersList, TimeSpan.FromMinutes(5));
+
+            return tickersList;
+        }
+        catch (Exception ex)
         {
-            result = result.Where(t => t.Industry == industry);
+            _logger.LogError(ex, "Error fetching tickers");
+            // Fallback to mock data
+            return GenerateMockTickers();
         }
-
-        return Task.FromResult(result);
     }
 
-    public Task<StockTicker?> GetTickerBySymbolAsync(string symbol)
+    public async Task<StockTicker?> GetTickerBySymbolAsync(string symbol)
     {
-        var ticker = _mockTickers.FirstOrDefault(t => t.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase));
-        return Task.FromResult(ticker);
+        try
+        {
+            var cacheKey = $"ticker_{symbol}";
+            var cachedTicker = await _cacheService.GetAsync<StockTicker>(cacheKey);
+
+            if (cachedTicker != null)
+            {
+                return cachedTicker;
+            }
+
+            var ticker = await _vnStockService.GetQuoteAsync(symbol);
+
+            if (ticker != null)
+            {
+                // Cache 1 phút
+                await _cacheService.SetAsync(cacheKey, ticker, TimeSpan.FromMinutes(1));
+            }
+
+            return ticker;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching ticker {Symbol}", symbol);
+            return null;
+        }
     }
 
-    public Task<StockTicker?> GetTickerByIdAsync(Guid id)
+    public async Task<StockTicker?> GetTickerByIdAsync(Guid id)
     {
-        var ticker = _mockTickers.FirstOrDefault(t => t.Id == id);
-        return Task.FromResult(ticker);
+        try
+        {
+            var ticker = await _dbContext.StockTickers.FindAsync(id);
+            return ticker;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching ticker by ID {Id}", id);
+            return null;
+        }
     }
 
     private List<StockTicker> GenerateMockTickers()

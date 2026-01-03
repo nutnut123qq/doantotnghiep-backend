@@ -23,6 +23,7 @@ public class StockTicker
     public ICollection<News> News { get; set; } = new List<News>();
     public ICollection<FinancialReport> FinancialReports { get; set; } = new List<FinancialReport>();
     public ICollection<TechnicalIndicator> TechnicalIndicators { get; set; } = new List<TechnicalIndicator>();
+    public ICollection<CorporateEvent> CorporateEvents { get; set; } = new List<CorporateEvent>();
 
     public StockTicker()
     {

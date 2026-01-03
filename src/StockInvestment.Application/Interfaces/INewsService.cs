@@ -7,4 +7,7 @@ public interface INewsService
     Task<IEnumerable<News>> GetNewsAsync(int page = 1, int pageSize = 20, Guid? tickerId = null);
     Task<News?> GetNewsByIdAsync(Guid id);
     Task RequestSummarizationAsync(Guid newsId);
+    Task<News> AddNewsAsync(News news);
+    Task<IEnumerable<News>> AddNewsRangeAsync(IEnumerable<News> newsList);
+    Task UpdateNewsAsync(News news);
 }

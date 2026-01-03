@@ -22,6 +22,76 @@ namespace StockInvestment.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("StockInvestment.Domain.Entities.AIModelConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ApiKey")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ModelName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Settings")
+                        .HasColumnType("text");
+
+                    b.Property<int>("UpdateFrequencyMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AIModelConfigs", (string)null);
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.AIModelPerformance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<double>("Accuracy")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("AverageResponseTimeMs")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("FailureCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FeatureType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ModelConfigId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("SuccessCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AIModelPerformances", (string)null);
+                });
+
             modelBuilder.Entity("StockInvestment.Domain.Entities.Alert", b =>
                 {
                     b.Property<Guid>("Id")
@@ -63,6 +133,146 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("Alerts", (string)null);
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.AnalyticsEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActivityType")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Endpoint")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Metadata")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Method")
+                        .HasColumnType("text");
+
+                    b.Property<long?>("ResponseTimeMs")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("StatusCode")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Symbol")
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AnalyticsEvents");
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.CorporateEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AdditionalData")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("EventDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EventType")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceUrl")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("StockTickerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventDate");
+
+                    b.HasIndex("StockTickerId");
+
+                    b.HasIndex("StockTickerId", "EventDate");
+
+                    b.ToTable("CorporateEvents", (string)null);
+
+                    b.HasDiscriminator<int>("EventType");
+
+                    b.UseTphMappingStrategy();
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.DataSource", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ApiKey")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Config")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastChecked")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("DataSources", (string)null);
                 });
 
             modelBuilder.Entity("StockInvestment.Domain.Entities.FinancialReport", b =>
@@ -186,6 +396,74 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.ToTable("News", (string)null);
                 });
 
+            modelBuilder.Entity("StockInvestment.Domain.Entities.NotificationTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EventType")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("NotificationTemplates", (string)null);
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.PushNotificationConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AppId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Config")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ServerKey")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ServiceName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PushNotificationConfigs", (string)null);
+                });
+
             modelBuilder.Entity("StockInvestment.Domain.Entities.StockTicker", b =>
                 {
                     b.Property<Guid>("Id")
@@ -304,6 +582,37 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.ToTable("Users", (string)null);
                 });
 
+            modelBuilder.Entity("StockInvestment.Domain.Entities.UserPreference", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PreferenceKey")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PreferenceValue")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "PreferenceKey")
+                        .IsUnique();
+
+                    b.ToTable("UserPreferences", (string)null);
+                });
+
             modelBuilder.Entity("StockInvestment.Domain.Entities.Watchlist", b =>
                 {
                     b.Property<Guid>("Id")
@@ -345,6 +654,148 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.ToTable("WatchlistTickers", (string)null);
                 });
 
+            modelBuilder.Entity("StockInvestment.Domain.Entities.AGMEvent", b =>
+                {
+                    b.HasBaseType("StockInvestment.Domain.Entities.CorporateEvent");
+
+                    b.Property<string>("Agenda")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Location")
+                        .HasColumnType("text");
+
+                    b.Property<TimeSpan?>("MeetingTime")
+                        .HasColumnType("interval");
+
+                    b.Property<DateTime?>("RecordDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasDiscriminator().HasValue(4);
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.DividendEvent", b =>
+                {
+                    b.HasBaseType("StockInvestment.Domain.Entities.CorporateEvent");
+
+                    b.Property<decimal?>("CashDividend")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("DividendPerShare")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("ExDividendDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PaymentDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RecordDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("StockDividendRatio")
+                        .HasColumnType("numeric");
+
+                    b.ToTable("CorporateEvents", t =>
+                        {
+                            t.Property("RecordDate")
+                                .HasColumnName("DividendEvent_RecordDate");
+                        });
+
+                    b.HasDiscriminator().HasValue(2);
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.EarningsEvent", b =>
+                {
+                    b.HasBaseType("StockInvestment.Domain.Entities.CorporateEvent");
+
+                    b.Property<decimal?>("EPS")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("NetProfit")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Period")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("Revenue")
+                        .HasColumnType("numeric");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.ToTable("CorporateEvents", t =>
+                        {
+                            t.Property("Year")
+                                .HasColumnName("EarningsEvent_Year");
+                        });
+
+                    b.HasDiscriminator().HasValue(1);
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.RightsIssueEvent", b =>
+                {
+                    b.HasBaseType("StockInvestment.Domain.Entities.CorporateEvent");
+
+                    b.Property<decimal>("IssuePrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<long>("NumberOfShares")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Purpose")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("RecordDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RightsRatio")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("SubscriptionEndDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("SubscriptionStartDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.ToTable("CorporateEvents", t =>
+                        {
+                            t.Property("RecordDate")
+                                .HasColumnName("RightsIssueEvent_RecordDate");
+                        });
+
+                    b.HasDiscriminator().HasValue(5);
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.StockSplitEvent", b =>
+                {
+                    b.HasBaseType("StockInvestment.Domain.Entities.CorporateEvent");
+
+                    b.Property<DateTime>("EffectiveDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsReverseSplit")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("RecordDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SplitRatio")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.ToTable("CorporateEvents", t =>
+                        {
+                            t.Property("RecordDate")
+                                .HasColumnName("StockSplitEvent_RecordDate");
+                        });
+
+                    b.HasDiscriminator().HasValue(3);
+                });
+
             modelBuilder.Entity("StockInvestment.Domain.Entities.Alert", b =>
                 {
                     b.HasOne("StockInvestment.Domain.Entities.StockTicker", "Ticker")
@@ -360,6 +811,17 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.Navigation("Ticker");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.CorporateEvent", b =>
+                {
+                    b.HasOne("StockInvestment.Domain.Entities.StockTicker", "StockTicker")
+                        .WithMany("CorporateEvents")
+                        .HasForeignKey("StockTickerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("StockTicker");
                 });
 
             modelBuilder.Entity("StockInvestment.Domain.Entities.FinancialReport", b =>
@@ -404,6 +866,17 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.Navigation("Ticker");
                 });
 
+            modelBuilder.Entity("StockInvestment.Domain.Entities.UserPreference", b =>
+                {
+                    b.HasOne("StockInvestment.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("StockInvestment.Domain.Entities.Watchlist", b =>
                 {
                     b.HasOne("StockInvestment.Domain.Entities.User", "User")
@@ -433,6 +906,8 @@ namespace StockInvestment.Infrastructure.Migrations
             modelBuilder.Entity("StockInvestment.Domain.Entities.StockTicker", b =>
                 {
                     b.Navigation("Alerts");
+
+                    b.Navigation("CorporateEvents");
 
                     b.Navigation("FinancialReports");
 

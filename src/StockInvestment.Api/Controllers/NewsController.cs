@@ -9,13 +9,13 @@ namespace StockInvestment.Api.Controllers;
 public class NewsController : ControllerBase
 {
     private readonly INewsService _newsService;
-    private readonly RabbitMQService _rabbitMQService;
+    private readonly RabbitMQService? _rabbitMQService;
     private readonly ILogger<NewsController> _logger;
 
     public NewsController(
         INewsService newsService,
-        RabbitMQService rabbitMQService,
-        ILogger<NewsController> logger)
+        ILogger<NewsController> logger,
+        RabbitMQService? rabbitMQService = null)
     {
         _newsService = newsService;
         _rabbitMQService = rabbitMQService;
@@ -31,12 +31,14 @@ public class NewsController : ControllerBase
         try
         {
             var news = await _newsService.GetNewsAsync(page, pageSize, tickerId);
-            return Ok(news);
+            // Return empty list instead of null
+            return Ok(news ?? Enumerable.Empty<object>());
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error fetching news");
-            return StatusCode(500, "An error occurred while fetching news");
+            // Return empty array instead of 500
+            return Ok(new List<object>());
         }
     }
 
@@ -46,9 +48,15 @@ public class NewsController : ControllerBase
         try
         {
             // Publish message to queue for async processing
-            _rabbitMQService.Publish("news_summarize", new { NewsId = id });
-
-            return Task.FromResult<IActionResult>(Accepted(new { message = "Summarization request queued", newsId = id }));
+            if (_rabbitMQService != null)
+            {
+                _rabbitMQService.Publish("news_summarize", new { NewsId = id });
+                return Task.FromResult<IActionResult>(Accepted(new { message = "Summarization request queued", newsId = id }));
+            }
+            else
+            {
+                return Task.FromResult<IActionResult>(Accepted(new { message = "Message queue unavailable, summarization disabled", newsId = id }));
+            }
         }
         catch (Exception ex)
         {

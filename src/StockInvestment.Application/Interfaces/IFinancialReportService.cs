@@ -5,6 +5,10 @@ namespace StockInvestment.Application.Interfaces;
 public interface IFinancialReportService
 {
     Task<IEnumerable<FinancialReport>> GetReportsByTickerAsync(Guid tickerId);
+    Task<IEnumerable<FinancialReport>> GetReportsBySymbolAsync(string symbol);
     Task<FinancialReport?> GetReportByIdAsync(Guid id);
+    Task<FinancialReport> AddReportAsync(FinancialReport report);
+    Task<IEnumerable<FinancialReport>> AddReportsRangeAsync(IEnumerable<FinancialReport> reports);
+    Task<string> AskQuestionAsync(Guid reportId, string question);
 }
 

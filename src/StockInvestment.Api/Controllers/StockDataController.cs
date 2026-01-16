@@ -73,6 +73,11 @@ public class StockDataController : ControllerBase
 
             return Ok(ohlcvData);
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting OHLCV data for {Symbol}", symbol);
+            throw; // Let GlobalExceptionHandlerMiddleware handle
+        }
     }
     
     private List<OHLCVData> GenerateMockHistoricalData(string symbol, DateTime start, DateTime end)
@@ -157,6 +162,11 @@ public class StockDataController : ControllerBase
 
             return Ok(quoteDto);
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting quote for {Symbol}", symbol);
+            throw; // Let GlobalExceptionHandlerMiddleware handle
+        }
     }
 
     /// <summary>
@@ -177,6 +187,11 @@ public class StockDataController : ControllerBase
             });
 
             return Ok(symbolList);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting symbols");
+            throw; // Let GlobalExceptionHandlerMiddleware handle
         }
     }
 

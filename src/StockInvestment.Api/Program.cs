@@ -14,7 +14,7 @@ Log.Information("Starting StockInvestment.Api application...");
 
 // Add services using extension methods
 builder.Services
-    .AddApiServices()
+    .AddApiServices(builder.Configuration)
     .AddApplicationServices()
     .AddAuthenticationServices(builder.Configuration)
     .AddInfrastructureServices(builder.Configuration)

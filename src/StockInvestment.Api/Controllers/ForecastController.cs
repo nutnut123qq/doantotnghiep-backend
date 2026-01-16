@@ -265,7 +265,11 @@ public class ForecastController : ControllerBase
                 }
             });
         }
-        // Let GlobalExceptionHandlerMiddleware handle any exceptions
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting forecasts for {Symbol}", symbol);
+            throw; // Let GlobalExceptionHandlerMiddleware handle
+        }
     }
 
     /// <summary>
@@ -304,7 +308,11 @@ public class ForecastController : ControllerBase
 
             return Ok(new BatchForecastResponseDto { Forecasts = forecasts });
         }
-        // Let GlobalExceptionHandlerMiddleware handle any exceptions
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting batch forecasts");
+            throw; // Let GlobalExceptionHandlerMiddleware handle
+        }
     }
 }
 

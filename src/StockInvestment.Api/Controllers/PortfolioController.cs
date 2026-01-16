@@ -37,6 +37,12 @@ public class PortfolioController : ControllerBase
 
             var holdings = await _portfolioService.GetHoldingsAsync(userId);
             return Ok(holdings);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting holdings");
+            throw; // Let GlobalExceptionHandlerMiddleware handle
+        }
     }
 
     /// <summary>

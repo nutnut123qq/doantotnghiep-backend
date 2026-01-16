@@ -31,7 +31,11 @@ public class TechnicalIndicatorController : ControllerBase
             var indicators = await _indicatorService.CalculateAllIndicatorsAsync(symbol);
             return Ok(new { symbol, indicators });
         }
-        // Let GlobalExceptionHandlerMiddleware handle any exceptions
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calculating indicators for {Symbol}", symbol);
+            throw; // Let GlobalExceptionHandlerMiddleware handle
+        }
     }
 
     /// <summary>
@@ -57,7 +61,11 @@ public class TechnicalIndicatorController : ControllerBase
 
             return Ok(new { symbol, indicatorType, value = result });
         }
-        // Let GlobalExceptionHandlerMiddleware handle any exceptions
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calculating {IndicatorType} for {Symbol}", indicatorType, symbol);
+            throw; // Let GlobalExceptionHandlerMiddleware handle
+        }
     }
 }
 

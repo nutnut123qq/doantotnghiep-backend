@@ -14,6 +14,9 @@ using System.Reflection;
 using FluentValidation;
 using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Http;
+using Polly;
+using Polly.Extensions.Http;
 using ICacheKeyGenerator = StockInvestment.Application.Interfaces.ICacheKeyGenerator;
 
 namespace StockInvestment.Api.Extensions;
@@ -23,7 +26,7 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Add core API services (Controllers, Swagger, SignalR, CORS)
     /// </summary>
-    public static IServiceCollection AddApiServices(this IServiceCollection services)
+    public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddControllers();
         services.AddEndpointsApiExplorer();
@@ -52,7 +55,7 @@ public static class ServiceCollectionExtensions
         services.AddSignalR()
             .AddStackExchangeRedis(redisConnection, options =>
             {
-                options.Configuration.ChannelPrefix = "StockInvestment";
+                options.Configuration.ChannelPrefix = RedisChannel.Literal("StockInvestment");
             });
 
         // Add CORS

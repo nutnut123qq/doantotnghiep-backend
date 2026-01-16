@@ -2,12 +2,14 @@ namespace StockInvestment.Application.Interfaces;
 
 public interface IAIService
 {
-    Task<string> SummarizeNewsAsync(string newsContent);
-    Task<string> AnalyzeEventAsync(string eventDescription);
-    Task<object> GenerateForecastAsync(Guid tickerId);
-    Task<ForecastResult> GenerateForecastBySymbolAsync(string symbol, string timeHorizon = "short");
-    Task<string> AnswerQuestionAsync(string question, string context);
-    Task<ParsedAlert> ParseAlertAsync(string naturalLanguageInput);
+    Task<string> SummarizeNewsAsync(string newsContent, CancellationToken cancellationToken = default);
+    Task<string> AnalyzeEventAsync(string eventDescription, CancellationToken cancellationToken = default);
+    Task<object> GenerateForecastAsync(Guid tickerId, CancellationToken cancellationToken = default);
+    Task<ForecastResult> GenerateForecastBySymbolAsync(string symbol, string timeHorizon = "short", CancellationToken cancellationToken = default);
+    Task<ForecastResult> GenerateForecastWithDataAsync(string symbol, string timeHorizon, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
+    Task<string> AnswerQuestionAsync(string question, string context, CancellationToken cancellationToken = default);
+    Task<ParsedAlert> ParseAlertAsync(string naturalLanguageInput, CancellationToken cancellationToken = default);
+    Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
 }
 
 public class ParsedAlert
@@ -30,6 +32,19 @@ public class ForecastResult
     public List<string> KeyDrivers { get; set; } = new();
     public List<string> Risks { get; set; } = new();
     public string Analysis { get; set; } = string.Empty;
+    public DateTime GeneratedAt { get; set; }
+}
+
+public class InsightResult
+{
+    public string Symbol { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty; // Buy, Sell, Hold
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public int Confidence { get; set; } // 0-100
+    public List<string> Reasoning { get; set; } = new();
+    public decimal? TargetPrice { get; set; }
+    public decimal? StopLoss { get; set; }
     public DateTime GeneratedAt { get; set; }
 }
 

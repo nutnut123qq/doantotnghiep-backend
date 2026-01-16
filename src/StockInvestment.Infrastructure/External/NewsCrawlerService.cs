@@ -99,8 +99,17 @@ public class NewsCrawlerService : INewsCrawlerService
 
         try
         {
-            var url = "https://cafef.vn/chung-khoan.chn";
-            var html = await _httpClient.GetStringAsync(url);
+            var url = "https://cafef.vn/thi-truong-chung-khoan.chn";
+            _logger.LogDebug("Crawling CafeF from URL: {Url}", url);
+            
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("CafeF returned status {StatusCode} for URL: {Url}. Skipping this source.", response.StatusCode, url);
+                return newsList;
+            }
+            
+            var html = await response.Content.ReadAsStringAsync();
             
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
@@ -148,6 +157,10 @@ public class NewsCrawlerService : INewsCrawlerService
                     _logger.LogWarning(ex, "Error parsing CafeF news item");
                 }
             }
+        }
+        catch (HttpRequestException httpEx)
+        {
+            _logger.LogWarning("HTTP error crawling CafeF: {Message}. This source may be temporarily unavailable.", httpEx.Message);
         }
         catch (Exception ex)
         {
@@ -221,8 +234,17 @@ public class NewsCrawlerService : INewsCrawlerService
 
         try
         {
-            var url = "https://vietstock.vn/thi-truong-chung-khoan";
-            var html = await _httpClient.GetStringAsync(url);
+            var url = "https://vietstock.vn/chung-khoan.htm";
+            _logger.LogDebug("Crawling VietStock from URL: {Url}", url);
+            
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("VietStock returned status {StatusCode} for URL: {Url}. Skipping this source.", response.StatusCode, url);
+                return newsList;
+            }
+            
+            var html = await response.Content.ReadAsStringAsync();
 
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
@@ -270,6 +292,10 @@ public class NewsCrawlerService : INewsCrawlerService
                     _logger.LogWarning(ex, "Error parsing VietStock news item");
                 }
             }
+        }
+        catch (HttpRequestException httpEx)
+        {
+            _logger.LogWarning("HTTP error crawling VietStock: {Message}. This source may be temporarily unavailable.", httpEx.Message);
         }
         catch (Exception ex)
         {

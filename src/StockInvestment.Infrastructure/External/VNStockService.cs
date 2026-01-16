@@ -30,7 +30,7 @@ public class VNStockService : IVNStockService
     {
         try
         {
-            var url = $"{_aiServiceUrl}/api/stock/symbols";
+            var url = "/api/stock/symbols";
             if (!string.IsNullOrEmpty(exchange))
             {
                 url += $"?exchange={exchange}";
@@ -60,6 +60,11 @@ public class VNStockService : IVNStockService
                 LastUpdated = DateTime.UtcNow
             });
         }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogWarning("Timeout fetching symbols from VNStock API. The service may be slow or unavailable.");
+            return Enumerable.Empty<StockTicker>();
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error fetching symbols from VNStock");
@@ -71,7 +76,7 @@ public class VNStockService : IVNStockService
     {
         try
         {
-            var url = $"{_aiServiceUrl}/api/stock/quote/{symbol}";
+            var url = $"/api/stock/quote/{symbol}";
             var response = await _httpClient.GetAsync(url);
             response.EnsureSuccessStatusCode();
 
@@ -101,6 +106,16 @@ public class VNStockService : IVNStockService
                 LastUpdated = DateTime.UtcNow
             };
         }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogWarning("Timeout fetching quote for {Symbol}. The VNStock API may be slow or unavailable.", symbol);
+            return null;
+        }
+        catch (HttpRequestException httpEx) when (httpEx.Message.Contains("404"))
+        {
+            _logger.LogWarning("Symbol {Symbol} not found (404) in VNStock API", symbol);
+            return null;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error fetching quote for {Symbol}", symbol);
@@ -119,30 +134,66 @@ public class VNStockService : IVNStockService
     {
         try
         {
-            var url = $"{_aiServiceUrl}/api/stock/historical/{symbol}?start={startDate:yyyy-MM-dd}&end={endDate:yyyy-MM-dd}";
+            var url = $"/api/stock/history/{symbol}?start_date={startDate:yyyy-MM-dd}&end_date={endDate:yyyy-MM-dd}";
             var response = await _httpClient.GetAsync(url);
             response.EnsureSuccessStatusCode();
 
             var content = await response.Content.ReadAsStringAsync();
-            var data = JsonSerializer.Deserialize<VNStockHistoricalResponse>(content, new JsonSerializerOptions
+            var dataList = JsonSerializer.Deserialize<List<VNStockHistoricalData>>(content, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             });
 
-            if (data?.Data == null)
+            if (dataList == null || dataList.Count == 0)
             {
                 return Enumerable.Empty<OHLCVData>();
             }
 
-            return data.Data.Select(d => new OHLCVData
+            return dataList.Select(d =>
             {
-                Date = d.Date,
-                Open = d.Open,
-                High = d.High,
-                Low = d.Low,
-                Close = d.Close,
-                Volume = d.Volume
+                DateTime date;
+                if (!string.IsNullOrEmpty(d.Time))
+                {
+                    // Parse time string to DateTime
+                    if (DateTime.TryParse(d.Time, out var parsedDate))
+                    {
+                        date = parsedDate;
+                    }
+                    else if (long.TryParse(d.Time, out var timestamp))
+                    {
+                        // Handle Unix timestamp
+                        date = DateTimeOffset.FromUnixTimeSeconds(timestamp).DateTime;
+                    }
+                    else
+                    {
+                        date = d.Date != default ? d.Date : DateTime.UtcNow;
+                    }
+                }
+                else
+                {
+                    date = d.Date != default ? d.Date : DateTime.UtcNow;
+                }
+
+                return new OHLCVData
+                {
+                    Date = date,
+                    Open = d.Open,
+                    High = d.High,
+                    Low = d.Low,
+                    Close = d.Close,
+                    Volume = d.Volume
+                };
             });
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogWarning("Timeout fetching historical data for {Symbol}. The VNStock API may be slow or unavailable.", symbol);
+            return Enumerable.Empty<OHLCVData>();
+        }
+        catch (HttpRequestException httpEx) when (httpEx.Message.Contains("404"))
+        {
+            _logger.LogWarning("Historical data not found (404) for {Symbol} in VNStock API", symbol);
+            return Enumerable.Empty<OHLCVData>();
         }
         catch (Exception ex)
         {
@@ -198,6 +249,8 @@ internal class VNStockHistoricalResponse
 
 internal class VNStockHistoricalData
 {
+    [System.Text.Json.Serialization.JsonPropertyName("time")]
+    public string? Time { get; set; }
     public DateTime Date { get; set; }
     public decimal Open { get; set; }
     public decimal High { get; set; }

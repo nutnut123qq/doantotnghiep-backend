@@ -1,9 +1,7 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Domain.Enums;
-using StockInvestment.Infrastructure.Data;
 
 namespace StockInvestment.Infrastructure.Services;
 
@@ -11,18 +9,21 @@ public class StockDataService : IStockDataService
 {
     private readonly ILogger<StockDataService> _logger;
     private readonly IVNStockService _vnStockService;
-    private readonly ApplicationDbContext _dbContext;
+    private readonly IStockTickerRepository _stockTickerRepository;
+    private readonly IWatchlistRepository _watchlistRepository;
     private readonly ICacheService _cacheService;
 
     public StockDataService(
         ILogger<StockDataService> logger,
         IVNStockService vnStockService,
-        ApplicationDbContext dbContext,
+        IStockTickerRepository stockTickerRepository,
+        IWatchlistRepository watchlistRepository,
         ICacheService cacheService)
     {
         _logger = logger;
         _vnStockService = vnStockService;
-        _dbContext = dbContext;
+        _stockTickerRepository = stockTickerRepository;
+        _watchlistRepository = watchlistRepository;
         _cacheService = cacheService;
     }
 
@@ -33,9 +34,7 @@ public class StockDataService : IStockDataService
             // Nếu có watchlistId, lấy từ database
             if (watchlistId.HasValue)
             {
-                var watchlist = await _dbContext.Watchlists
-                    .Include(w => w.Tickers)
-                    .FirstOrDefaultAsync(w => w.Id == watchlistId.Value);
+                var watchlist = await _watchlistRepository.GetByIdWithTickersAsync(watchlistId.Value);
 
                 if (watchlist != null)
                 {
@@ -52,18 +51,61 @@ public class StockDataService : IStockDataService
                 return cachedTickers;
             }
 
-            // Lấy dữ liệu từ VNStock
-            var tickers = await _vnStockService.GetAllSymbolsAsync(exchange);
-            var tickersList = tickers.ToList();
+            // Ưu tiên lấy từ database trước (nếu có dữ liệu đã được cập nhật)
+            var dbTickers = await _stockTickerRepository.GetTickersAsync(exchange, null, industry);
+            var dbTickersList = dbTickers.ToList();
+
+            // Nếu có dữ liệu trong DB và đã được cập nhật gần đây (trong vòng 10 phút), dùng dữ liệu từ DB
+            if (dbTickersList.Any() && dbTickersList.Any(t => t.LastUpdated > DateTime.UtcNow.AddMinutes(-10)))
+            {
+                var result = dbTickersList.Where(t => t.LastUpdated > DateTime.UtcNow.AddMinutes(-10)).ToList();
+                
+                // Cache 2 phút
+                await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(2));
+                
+                return result;
+            }
+
+            // Nếu không có trong DB hoặc dữ liệu cũ, lấy từ VNStock API
+            // Lấy danh sách symbols
+            var symbols = await _vnStockService.GetAllSymbolsAsync(exchange);
+            var symbolsList = symbols.ToList();
 
             // Filter theo industry nếu có
             if (!string.IsNullOrEmpty(industry))
             {
-                tickersList = tickersList.Where(t => t.Industry?.Contains(industry, StringComparison.OrdinalIgnoreCase) == true).ToList();
+                symbolsList = symbolsList.Where(t => t.Industry?.Contains(industry, StringComparison.OrdinalIgnoreCase) == true).ToList();
             }
 
-            // Cache 5 phút
-            await _cacheService.SetAsync(cacheKey, tickersList, TimeSpan.FromMinutes(5));
+            // Giới hạn số lượng để tránh quá chậm (lấy tối đa 100 symbols đầu tiên)
+            var limitedSymbols = symbolsList.Take(100).Select(s => s.Symbol).ToList();
+
+            // Lấy giá (quotes) cho các symbols này
+            var quotes = await _vnStockService.GetQuotesAsync(limitedSymbols);
+            var quotesList = quotes.ToList();
+
+            // Merge với thông tin từ symbols (để có đầy đủ thông tin)
+            var tickersList = quotesList.Select(quote =>
+            {
+                var symbolInfo = symbolsList.FirstOrDefault(s => s.Symbol == quote.Symbol);
+                if (symbolInfo != null)
+                {
+                    // Cập nhật thông tin từ symbol nếu quote thiếu
+                    quote.Name = symbolInfo.Name ?? quote.Name;
+                    quote.Exchange = symbolInfo.Exchange;
+                    quote.Industry = symbolInfo.Industry ?? quote.Industry;
+                }
+                return quote;
+            }).ToList();
+
+            // Nếu không lấy được quotes, fallback về symbols (nhưng sẽ có giá = 0)
+            if (!tickersList.Any() && symbolsList.Any())
+            {
+                tickersList = symbolsList.Take(100).ToList();
+            }
+
+            // Cache 2 phút (ngắn hơn để cập nhật giá thường xuyên hơn)
+            await _cacheService.SetAsync(cacheKey, tickersList, TimeSpan.FromMinutes(2));
 
             return tickersList;
         }
@@ -108,13 +150,85 @@ public class StockDataService : IStockDataService
     {
         try
         {
-            var ticker = await _dbContext.StockTickers.FindAsync(id);
+            var ticker = await _stockTickerRepository.GetByIdAsync(id);
             return ticker;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error fetching ticker by ID {Id}", id);
             return null;
+        }
+    }
+
+    public async Task<Dictionary<string, StockTicker>> GetTickersBySymbolsAsync(IEnumerable<string> symbols)
+    {
+        try
+        {
+            var symbolsList = symbols.Distinct().ToList();
+            if (!symbolsList.Any())
+            {
+                return new Dictionary<string, StockTicker>();
+            }
+
+            // Try to get from database first (batch query)
+            var dbTickers = await _stockTickerRepository.GetBySymbolsAsync(symbolsList);
+
+            var result = new Dictionary<string, StockTicker>();
+            var missingSymbols = new List<string>();
+
+            // Add tickers found in database
+            foreach (var kvp in dbTickers)
+            {
+                result[kvp.Key] = kvp.Value;
+            }
+
+            // Find missing symbols
+            foreach (var symbol in symbolsList)
+            {
+                if (!result.ContainsKey(symbol))
+                {
+                    missingSymbols.Add(symbol);
+                }
+            }
+
+            // For missing symbols, try to get from VNStock API (batch)
+            if (missingSymbols.Any())
+            {
+                try
+                {
+                    var quotes = await _vnStockService.GetQuotesAsync(missingSymbols);
+                    foreach (var quote in quotes)
+                    {
+                        if (quote != null)
+                        {
+                            result[quote.Symbol] = quote;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error fetching quotes for missing symbols, will use individual lookups");
+                    // Fallback to individual lookups for remaining symbols
+                    foreach (var symbol in missingSymbols)
+                    {
+                        if (!result.ContainsKey(symbol))
+                        {
+                            var ticker = await GetTickerBySymbolAsync(symbol);
+                            if (ticker != null)
+                            {
+                                result[symbol] = ticker;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching tickers by symbols");
+            return new Dictionary<string, StockTicker>();
         }
     }
 

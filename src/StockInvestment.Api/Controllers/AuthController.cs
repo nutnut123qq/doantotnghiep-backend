@@ -2,6 +2,8 @@ using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Features.Auth.Login;
 using StockInvestment.Application.Features.Auth.Register;
+using StockInvestment.Application.Features.Auth.VerifyEmail;
+using StockInvestment.Application.Features.Auth.ResendVerification;
 using StockInvestment.Api.Middleware;
 
 namespace StockInvestment.Api.Controllers;
@@ -40,6 +42,37 @@ public class AuthController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login([FromBody] LoginCommand command)
+    {
+        var result = await _mediator.Send(command);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Verify email address with token
+    /// </summary>
+    [HttpPost("verify-email")]
+    [ProducesResponseType(typeof(VerifyEmailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> VerifyEmail([FromQuery] string token)
+    {
+        var command = new VerifyEmailCommand { Token = token };
+        var result = await _mediator.Send(command);
+        
+        if (!result.Success)
+        {
+            return BadRequest(result);
+        }
+        
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Resend verification email
+    /// </summary>
+    [HttpPost("resend-verification")]
+    [ProducesResponseType(typeof(ResendVerificationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationCommand command)
     {
         var result = await _mediator.Send(command);
         return Ok(result);

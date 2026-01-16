@@ -80,6 +80,39 @@ public class GlobalExceptionHandlerMiddleware
                     TraceId = context.TraceIdentifier
                 }),
 
+            ExternalServiceException externalServiceEx => (
+                externalServiceEx.StatusCode ?? StatusCodes.Status503ServiceUnavailable,
+                new ErrorResponse
+                {
+                    Error = externalServiceEx.Message,
+                    Details = _environment.IsDevelopment() ? new { ServiceName = externalServiceEx.ServiceName, StatusCode = externalServiceEx.StatusCode } : null,
+                    TraceId = context.TraceIdentifier
+                }),
+
+            TimeoutException timeoutEx => (
+                StatusCodes.Status504GatewayTimeout,
+                new ErrorResponse
+                {
+                    Error = "Request timeout. The operation took too long to complete.",
+                    TraceId = context.TraceIdentifier
+                }),
+
+            TaskCanceledException canceledEx => (
+                StatusCodes.Status504GatewayTimeout,
+                new ErrorResponse
+                {
+                    Error = "Request was canceled or timed out.",
+                    TraceId = context.TraceIdentifier
+                }),
+
+            InvalidOperationException invalidOpEx => (
+                StatusCodes.Status400BadRequest,
+                new ErrorResponse
+                {
+                    Error = invalidOpEx.Message,
+                    TraceId = context.TraceIdentifier
+                }),
+
             _ => (
                 StatusCodes.Status500InternalServerError,
                 new ErrorResponse

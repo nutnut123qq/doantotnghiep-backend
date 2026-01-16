@@ -31,11 +31,7 @@ public class TechnicalIndicatorController : ControllerBase
             var indicators = await _indicatorService.CalculateAllIndicatorsAsync(symbol);
             return Ok(new { symbol, indicators });
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting indicators for {Symbol}", symbol);
-            return StatusCode(500, "Error calculating indicators");
-        }
+        // Let GlobalExceptionHandlerMiddleware handle any exceptions
     }
 
     /// <summary>
@@ -46,7 +42,7 @@ public class TechnicalIndicatorController : ControllerBase
     {
         try
         {
-            object result = indicatorType.ToUpper() switch
+            object? result = indicatorType.ToUpper() switch
             {
                 "MA" => await _indicatorService.CalculateMAAsync(symbol, period),
                 "RSI" => await _indicatorService.CalculateRSIAsync(symbol, period),
@@ -61,11 +57,7 @@ public class TechnicalIndicatorController : ControllerBase
 
             return Ok(new { symbol, indicatorType, value = result });
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting {IndicatorType} for {Symbol}", indicatorType, symbol);
-            return StatusCode(500, "Error calculating indicator");
-        }
+        // Let GlobalExceptionHandlerMiddleware handle any exceptions
     }
 }
 

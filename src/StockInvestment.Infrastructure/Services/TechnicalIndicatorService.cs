@@ -141,8 +141,6 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
 
     public async Task<List<TechnicalIndicator>> CalculateAllIndicatorsAsync(string symbol)
     {
-        var indicators = new List<TechnicalIndicator>();
-
         try
         {
             var ma20 = await CalculateMAAsync(symbol, 20);
@@ -150,46 +148,37 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
             var rsi = await CalculateRSIAsync(symbol, 14);
             var macd = await CalculateMACDAsync(symbol);
 
-            var trend = GetTrendAssessment(rsi, macd);
-
-            indicators.Add(new TechnicalIndicator
-            {
-                IndicatorType = "MA20",
-                Value = ma20,
-                TrendAssessment = trend,
-                CalculatedAt = DateTime.UtcNow
-            });
-
-            indicators.Add(new TechnicalIndicator
-            {
-                IndicatorType = "MA50",
-                Value = ma50,
-                TrendAssessment = trend,
-                CalculatedAt = DateTime.UtcNow
-            });
-
-            indicators.Add(new TechnicalIndicator
-            {
-                IndicatorType = "RSI",
-                Value = rsi,
-                TrendAssessment = GetRSITrend(rsi),
-                CalculatedAt = DateTime.UtcNow
-            });
-
-            indicators.Add(new TechnicalIndicator
-            {
-                IndicatorType = "MACD",
-                Value = macd.MACD,
-                TrendAssessment = macd.Histogram > 0 ? "Bullish" : "Bearish",
-                CalculatedAt = DateTime.UtcNow
-            });
+            return BuildIndicatorList(ma20, ma50, rsi, macd);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error calculating all indicators for {Symbol}", symbol);
+            return new List<TechnicalIndicator>();
         }
+    }
+
+    private List<TechnicalIndicator> BuildIndicatorList(decimal ma20, decimal ma50, decimal rsi, MACDResult macd)
+    {
+        var indicators = new List<TechnicalIndicator>();
+        var trend = GetTrendAssessment(rsi, macd);
+
+        indicators.Add(CreateIndicatorEntity("MA20", ma20, trend));
+        indicators.Add(CreateIndicatorEntity("MA50", ma50, trend));
+        indicators.Add(CreateIndicatorEntity("RSI", rsi, GetRSITrend(rsi)));
+        indicators.Add(CreateIndicatorEntity("MACD", macd.MACD, macd.Histogram > 0 ? "Bullish" : "Bearish"));
 
         return indicators;
+    }
+
+    private TechnicalIndicator CreateIndicatorEntity(string indicatorType, decimal value, string trendAssessment)
+    {
+        return new TechnicalIndicator
+        {
+            IndicatorType = indicatorType,
+            Value = value,
+            TrendAssessment = trendAssessment,
+            CalculatedAt = DateTime.UtcNow
+        };
     }
 
     public string GetTrendAssessment(decimal rsi, MACDResult macd)

@@ -31,7 +31,7 @@ public class AnalyticsMiddleware
         {
             stopwatch.Stop();
 
-            // Track the request (fire and forget)
+            // Track the request (fire and forget with proper error handling and cancellation)
             _ = Task.Run(async () =>
             {
                 try
@@ -46,9 +46,10 @@ public class AnalyticsMiddleware
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error tracking API request");
+                    _logger.LogError(ex, "Error tracking API request in background task");
+                    // Don't rethrow - this is fire-and-forget, but we log the error
                 }
-            });
+            }, context.RequestAborted); // Use request cancellation token
         }
     }
 }

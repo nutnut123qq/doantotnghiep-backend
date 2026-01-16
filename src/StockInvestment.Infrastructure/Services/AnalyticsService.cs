@@ -3,8 +3,6 @@ using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Infrastructure.Data;
-using StockInvestment.Infrastructure.Services;
-using System.Text.Json;
 
 namespace StockInvestment.Infrastructure.Services;
 
@@ -48,7 +46,7 @@ public class AnalyticsService : IAnalyticsService
             await _dbContext.SaveChangesAsync();
             
             // Invalidate cache
-            await InvalidateAnalyticsCacheAsync().ConfigureAwait(false);
+            await InvalidateAnalyticsCacheAsync();
         }
         catch (Exception ex)
         {
@@ -72,7 +70,7 @@ public class AnalyticsService : IAnalyticsService
             await _dbContext.SaveChangesAsync();
             
             // Invalidate popular stocks cache
-            await _cache.RemoveAsync($"{CacheKeyPrefix}popular_stocks").ConfigureAwait(false);
+            await _cache.RemoveAsync($"{CacheKeyPrefix}popular_stocks");
         }
         catch (Exception ex)
         {
@@ -97,7 +95,7 @@ public class AnalyticsService : IAnalyticsService
             await _dbContext.SaveChangesAsync();
             
             // Invalidate activity cache
-            await _cache.RemoveAsync($"{CacheKeyPrefix}user_activity").ConfigureAwait(false);
+            await _cache.RemoveAsync($"{CacheKeyPrefix}user_activity");
         }
         catch (Exception ex)
         {

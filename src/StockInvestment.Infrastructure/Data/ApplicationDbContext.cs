@@ -26,6 +26,9 @@ public class ApplicationDbContext : DbContext
     public DbSet<AIModelPerformance> AIModelPerformances { get; set; } = null!;
     public DbSet<NotificationTemplate> NotificationTemplates { get; set; } = null!;
     public DbSet<PushNotificationConfig> PushNotificationConfigs { get; set; } = null!;
+    public DbSet<AIInsight> AIInsights { get; set; } = null!;
+    public DbSet<Portfolio> Portfolios { get; set; } = null!;
+    public DbSet<EmailVerificationToken> EmailVerificationTokens { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -74,6 +77,25 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<AIModelPerformance>().ToTable("AIModelPerformances");
         modelBuilder.Entity<NotificationTemplate>().ToTable("NotificationTemplates");
         modelBuilder.Entity<PushNotificationConfig>().ToTable("PushNotificationConfigs");
+        modelBuilder.Entity<AIInsight>().ToTable("AIInsights");
+        modelBuilder.Entity<Portfolio>().ToTable("Portfolios");
+
+        // Configure Portfolio relationship with User
+        modelBuilder.Entity<Portfolio>()
+            .HasOne(p => p.User)
+            .WithMany()
+            .HasForeignKey(p => p.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Configure Portfolio indexes
+        modelBuilder.Entity<Portfolio>()
+            .HasIndex(p => p.UserId);
+        
+        modelBuilder.Entity<Portfolio>()
+            .HasIndex(p => p.Symbol);
+        
+        modelBuilder.Entity<Portfolio>()
+            .HasIndex(p => new { p.UserId, p.Symbol });
 
         // Configure CorporateEvent inheritance (TPH - Table Per Hierarchy)
         modelBuilder.Entity<CorporateEvent>()
@@ -99,6 +121,43 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<UserPreference>()
             .HasIndex(p => new { p.UserId, p.PreferenceKey })
             .IsUnique();
+
+        // Configure AIInsight indexes
+        modelBuilder.Entity<AIInsight>()
+            .HasIndex(i => i.TickerId);
+        
+        modelBuilder.Entity<AIInsight>()
+            .HasIndex(i => i.Type);
+        
+        modelBuilder.Entity<AIInsight>()
+            .HasIndex(i => i.GeneratedAt);
+        
+        modelBuilder.Entity<AIInsight>()
+            .HasIndex(i => new { i.TickerId, i.Type, i.GeneratedAt });
+        
+        modelBuilder.Entity<AIInsight>()
+            .HasIndex(i => i.DismissedAt)
+            .HasFilter("[DismissedAt] IS NULL");
+
+        // Configure EmailVerificationToken
+        modelBuilder.Entity<EmailVerificationToken>()
+            .ToTable("EmailVerificationTokens");
+
+        modelBuilder.Entity<EmailVerificationToken>()
+            .HasOne(t => t.User)
+            .WithMany()
+            .HasForeignKey(t => t.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<EmailVerificationToken>()
+            .HasIndex(t => t.Token)
+            .IsUnique();
+
+        modelBuilder.Entity<EmailVerificationToken>()
+            .HasIndex(t => t.UserId);
+
+        modelBuilder.Entity<EmailVerificationToken>()
+            .HasIndex(t => t.ExpiresAt);
     }
 }
 

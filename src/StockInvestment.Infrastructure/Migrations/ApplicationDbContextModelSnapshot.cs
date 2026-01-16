@@ -22,6 +22,72 @@ namespace StockInvestment.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("StockInvestment.Domain.Entities.AIInsight", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Confidence")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("DismissedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DismissedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("GeneratedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reasoning")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("StopLoss")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("TargetPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid>("TickerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DismissedAt")
+                        .HasFilter("[DismissedAt] IS NULL");
+
+                    b.HasIndex("DismissedByUserId");
+
+                    b.HasIndex("GeneratedAt");
+
+                    b.HasIndex("TickerId");
+
+                    b.HasIndex("Type");
+
+                    b.HasIndex("TickerId", "Type", "GeneratedAt");
+
+                    b.ToTable("AIInsights", (string)null);
+                });
+
             modelBuilder.Entity("StockInvestment.Domain.Entities.AIModelConfig", b =>
                 {
                     b.Property<Guid>("Id")
@@ -431,6 +497,58 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.ToTable("NotificationTemplates", (string)null);
                 });
 
+            modelBuilder.Entity("StockInvestment.Domain.Entities.Portfolio", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AvgPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("CurrentPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("GainLoss")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("GainLossPercentage")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("Shares")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Symbol")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Value")
+                        .HasColumnType("numeric");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Symbol");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "Symbol");
+
+                    b.ToTable("Portfolios", (string)null);
+                });
+
             modelBuilder.Entity("StockInvestment.Domain.Entities.PushNotificationConfig", b =>
                 {
                     b.Property<Guid>("Id")
@@ -796,6 +914,23 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.HasDiscriminator().HasValue(3);
                 });
 
+            modelBuilder.Entity("StockInvestment.Domain.Entities.AIInsight", b =>
+                {
+                    b.HasOne("StockInvestment.Domain.Entities.User", "DismissedByUser")
+                        .WithMany("DismissedAIInsights")
+                        .HasForeignKey("DismissedByUserId");
+
+                    b.HasOne("StockInvestment.Domain.Entities.StockTicker", "Ticker")
+                        .WithMany("AIInsights")
+                        .HasForeignKey("TickerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("DismissedByUser");
+
+                    b.Navigation("Ticker");
+                });
+
             modelBuilder.Entity("StockInvestment.Domain.Entities.Alert", b =>
                 {
                     b.HasOne("StockInvestment.Domain.Entities.StockTicker", "Ticker")
@@ -855,6 +990,17 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.Navigation("Ticker");
                 });
 
+            modelBuilder.Entity("StockInvestment.Domain.Entities.Portfolio", b =>
+                {
+                    b.HasOne("StockInvestment.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("StockInvestment.Domain.Entities.TechnicalIndicator", b =>
                 {
                     b.HasOne("StockInvestment.Domain.Entities.StockTicker", "Ticker")
@@ -905,6 +1051,8 @@ namespace StockInvestment.Infrastructure.Migrations
 
             modelBuilder.Entity("StockInvestment.Domain.Entities.StockTicker", b =>
                 {
+                    b.Navigation("AIInsights");
+
                     b.Navigation("Alerts");
 
                     b.Navigation("CorporateEvents");
@@ -919,6 +1067,8 @@ namespace StockInvestment.Infrastructure.Migrations
             modelBuilder.Entity("StockInvestment.Domain.Entities.User", b =>
                 {
                     b.Navigation("Alerts");
+
+                    b.Navigation("DismissedAIInsights");
 
                     b.Navigation("Layouts");
 

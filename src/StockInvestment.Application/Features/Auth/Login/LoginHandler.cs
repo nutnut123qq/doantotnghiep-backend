@@ -17,7 +17,10 @@ public class LoginHandler : IRequestHandler<LoginCommand, LoginDto>
     private readonly IUserRepository _userRepository;
     private readonly IPasswordHasher _passwordHasher;
     private readonly ILogger<LoginHandler> _logger;
+    private readonly IConfiguration _configuration;
     private readonly string _jwtSecret;
+    private readonly string _jwtIssuer;
+    private readonly string _jwtAudience;
 
     public LoginHandler(
         IUserRepository userRepository,
@@ -28,7 +31,10 @@ public class LoginHandler : IRequestHandler<LoginCommand, LoginDto>
         _userRepository = userRepository;
         _passwordHasher = passwordHasher;
         _logger = logger;
+        _configuration = configuration;
         _jwtSecret = configuration["JWT:Secret"] ?? "your-super-secret-key-change-in-production-min-32-chars";
+        _jwtIssuer = configuration["JWT:Issuer"] ?? "StockInvestmentApi";
+        _jwtAudience = configuration["JWT:Audience"] ?? "StockInvestmentClient";
     }
 
     public async Task<LoginDto> Handle(LoginCommand request, CancellationToken cancellationToken)
@@ -46,6 +52,12 @@ public class LoginHandler : IRequestHandler<LoginCommand, LoginDto>
         {
             _logger.LogWarning("Login attempt failed: Account deactivated for email {Email}", email.Value);
             throw new UnauthorizedException("Account is deactivated");
+        }
+
+        if (!user.IsEmailVerified)
+        {
+            _logger.LogWarning("Login attempt failed: Email not verified for email {Email}", email.Value);
+            throw new UnauthorizedException("Please verify your email before logging in. Check your inbox for the verification link.");
         }
 
         // Verify password using BCrypt
@@ -81,6 +93,8 @@ public class LoginHandler : IRequestHandler<LoginCommand, LoginDto>
                 new Claim(ClaimTypes.Role, user.Role.ToString())
             }),
             Expires = DateTime.UtcNow.AddDays(7),
+            Issuer = _jwtIssuer,
+            Audience = _jwtAudience,
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
         };
         var token = tokenHandler.CreateToken(tokenDescriptor);

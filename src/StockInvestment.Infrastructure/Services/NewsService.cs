@@ -24,41 +24,25 @@ public class NewsService : INewsService
 
     public async Task<IEnumerable<News>> GetNewsAsync(int page = 1, int pageSize = 20, Guid? tickerId = null)
     {
-        try
+        var query = _context.News.AsQueryable();
+
+        if (tickerId.HasValue)
         {
-            var query = _context.News.AsQueryable();
-
-            if (tickerId.HasValue)
-            {
-                query = query.Where(n => n.TickerId == tickerId.Value);
-            }
-
-            var news = await query
-                .OrderByDescending(n => n.PublishedAt)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
-
-            return news;
+            query = query.Where(n => n.TickerId == tickerId.Value);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching news from database");
-            return Enumerable.Empty<News>();
-        }
+
+        var news = await query
+            .OrderByDescending(n => n.PublishedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return news;
     }
 
     public async Task<News?> GetNewsByIdAsync(Guid id)
     {
-        try
-        {
-            return await _unitOfWork.Repository<News>().GetByIdAsync(id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching news {Id} from database", id);
-            return null;
-        }
+        return await _unitOfWork.Repository<News>().GetByIdAsync(id);
     }
 
     public Task RequestSummarizationAsync(Guid newsId)

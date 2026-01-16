@@ -21,11 +21,12 @@ public class GetNotificationTemplatesQueryHandler : IRequestHandler<GetNotificat
 
     public async Task<GetNotificationTemplatesResponse> Handle(GetNotificationTemplatesQuery request, CancellationToken cancellationToken)
     {
+        var allTemplates = await _unitOfWork.Repository<NotificationTemplate>()
+            .GetAllAsync(cancellationToken);
+        
         var templates = request.EventType.HasValue
-            ? await _unitOfWork.Repository<NotificationTemplate>()
-                .GetAllAsync(cancellationToken)
-                .ContinueWith(t => t.Result.Where(tmpl => tmpl.EventType == request.EventType.Value), cancellationToken)
-            : await _unitOfWork.Repository<NotificationTemplate>().GetAllAsync(cancellationToken);
+            ? allTemplates.Where(tmpl => tmpl.EventType == request.EventType.Value)
+            : allTemplates;
 
         var dtos = templates.Select(t => new NotificationTemplateDto
         {

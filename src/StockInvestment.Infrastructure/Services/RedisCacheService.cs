@@ -133,5 +133,27 @@ public class RedisCacheService : ICacheService
 
         return value;
     }
+
+    public async Task<long> IncrementAsync(string key, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var db = _redis.GetDatabase();
+            var value = await db.StringIncrementAsync(key);
+            
+            // Set expiration if provided
+            if (expiration.HasValue)
+            {
+                await db.KeyExpireAsync(key, expiration.Value);
+            }
+            
+            return value;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error incrementing cache value for key: {Key}", key);
+            throw;
+        }
+    }
 }
 

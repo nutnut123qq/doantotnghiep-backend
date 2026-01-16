@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
+using System.Net;
 using System.Net.Http.Json;
 
 namespace StockInvestment.Infrastructure.External;
@@ -15,11 +16,11 @@ public class AIServiceClient : IAIService
         _logger = logger;
     }
 
-    public async Task<string> SummarizeNewsAsync(string newsContent)
+    public async Task<string> SummarizeNewsAsync(string newsContent, CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("/api/summarize", new { content = newsContent });
+            var response = await _httpClient.PostAsJsonAsync("/api/summarize", new { content = newsContent }, cancellationToken);
             response.EnsureSuccessStatusCode();
             var result = await response.Content.ReadFromJsonAsync<SummarizeResponse>();
             return result?.Summary ?? string.Empty;
@@ -31,11 +32,11 @@ public class AIServiceClient : IAIService
         }
     }
 
-    public async Task<string> AnalyzeEventAsync(string eventDescription)
+    public async Task<string> AnalyzeEventAsync(string eventDescription, CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("/api/analyze-event", new { description = eventDescription });
+            var response = await _httpClient.PostAsJsonAsync("/api/analyze-event", new { description = eventDescription }, cancellationToken);
             response.EnsureSuccessStatusCode();
             var result = await response.Content.ReadFromJsonAsync<AnalyzeResponse>();
             return result?.Analysis ?? string.Empty;
@@ -47,11 +48,11 @@ public class AIServiceClient : IAIService
         }
     }
 
-    public async Task<object> GenerateForecastAsync(Guid tickerId)
+    public async Task<object> GenerateForecastAsync(Guid tickerId, CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("/api/forecast", new { tickerId });
+            var response = await _httpClient.PostAsJsonAsync("/api/forecast", new { tickerId }, cancellationToken);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadFromJsonAsync<object>() ?? new { };
         }
@@ -62,11 +63,11 @@ public class AIServiceClient : IAIService
         }
     }
 
-    public async Task<string> AnswerQuestionAsync(string question, string context)
+    public async Task<string> AnswerQuestionAsync(string question, string context, CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("/api/qa", new { question, context });
+            var response = await _httpClient.PostAsJsonAsync("/api/qa", new { question, context }, cancellationToken);
             response.EnsureSuccessStatusCode();
             var result = await response.Content.ReadFromJsonAsync<QAResponse>();
             return result?.Answer ?? string.Empty;
@@ -78,17 +79,17 @@ public class AIServiceClient : IAIService
         }
     }
 
-    public async Task<ParsedAlert> ParseAlertAsync(string naturalLanguageInput)
+    public async Task<ParsedAlert> ParseAlertAsync(string naturalLanguageInput, CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync("/api/parse-alert", new { input = naturalLanguageInput });
+            var response = await _httpClient.PostAsJsonAsync("/api/parse-alert", new { input = naturalLanguageInput }, cancellationToken);
             response.EnsureSuccessStatusCode();
             var result = await response.Content.ReadFromJsonAsync<ParseAlertApiResponse>();
 
             if (result == null)
             {
-                throw new Exception("Failed to parse alert from AI service");
+                throw new Domain.Exceptions.ExternalServiceException("AI Service", "Failed to parse alert from AI service");
             }
 
             return new ParsedAlert
@@ -108,38 +109,220 @@ public class AIServiceClient : IAIService
         }
     }
 
-    public async Task<ForecastResult> GenerateForecastBySymbolAsync(string symbol, string timeHorizon = "short")
+    public async Task<ForecastResult> GenerateForecastBySymbolAsync(string symbol, string timeHorizon = "short", CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await _httpClient.GetAsync($"/api/forecast/{symbol}?time_horizon={timeHorizon}");
+            EnsureBaseAddressConfigured();
+
+            var endpoint = $"/api/forecast/{symbol}";
+            var response = await _httpClient.GetAsync($"{endpoint}?time_horizon={timeHorizon}", cancellationToken);
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                await HandleHttpErrorAsync(response, endpoint, symbol);
+            }
+            
             response.EnsureSuccessStatusCode();
             var result = await response.Content.ReadFromJsonAsync<ForecastApiResponse>();
 
-            if (result == null)
-            {
-                throw new Exception("Failed to get forecast from AI service");
-            }
-
-            return new ForecastResult
-            {
-                Symbol = result.Symbol,
-                Trend = result.Trend,
-                Confidence = result.Confidence,
-                ConfidenceScore = result.ConfidenceScore,
-                TimeHorizon = result.TimeHorizon,
-                Recommendation = result.Recommendation,
-                KeyDrivers = result.KeyDrivers,
-                Risks = result.Risks,
-                Analysis = result.Analysis,
-                GeneratedAt = DateTime.Parse(result.GeneratedAt)
-            };
+            return ParseForecastResponse(result);
+        }
+        catch (HttpRequestException httpEx) when (httpEx.Data.Contains("StatusCode") && (int)httpEx.Data["StatusCode"]! == 404)
+        {
+            _logger.LogWarning("AI service endpoint /api/forecast/{Symbol} not found (404). AI service may not be running or endpoint path is incorrect.", symbol);
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error calling AI service for forecast generation");
             throw;
         }
+    }
+
+    public async Task<ForecastResult> GenerateForecastWithDataAsync(string symbol, string timeHorizon, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            EnsureBaseAddressConfigured();
+
+            var request = new
+            {
+                symbol = symbol,
+                technical_data = technicalData ?? new Dictionary<string, string>(),
+                fundamental_data = fundamentalData ?? new Dictionary<string, string>(),
+                sentiment_data = sentimentData ?? new Dictionary<string, string>(),
+                time_horizon = timeHorizon
+            };
+
+            var endpoint = "/api/forecast/generate";
+            var response = await _httpClient.PostAsJsonAsync(endpoint, request, cancellationToken);
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                await HandleHttpErrorAsync(response, endpoint, symbol);
+            }
+            
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<ForecastApiResponse>();
+
+            return ParseForecastResponse(result);
+        }
+        catch (HttpRequestException httpEx) when (httpEx.Data.Contains("StatusCode") && (int)httpEx.Data["StatusCode"]! == 404)
+        {
+            _logger.LogWarning("AI service endpoint /api/forecast/generate not found (404). AI service may not be running or endpoint path is incorrect.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calling AI service for forecast generation with real data");
+            throw;
+        }
+    }
+
+    private static DateTime ParseGeneratedAt(string? generatedAt)
+    {
+        if (string.IsNullOrWhiteSpace(generatedAt))
+        {
+            return DateTime.UtcNow;
+        }
+
+        if (DateTime.TryParse(generatedAt, out var parsedDate))
+        {
+            return parsedDate;
+        }
+
+        // If parsing fails, return current time
+        return DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Ensure HttpClient BaseAddress is configured
+    /// </summary>
+    private void EnsureBaseAddressConfigured()
+    {
+        if (_httpClient.BaseAddress == null)
+        {
+            throw new InvalidOperationException("HttpClient BaseAddress is not configured. Please check AIService configuration.");
+        }
+    }
+
+    /// <summary>
+    /// Check if error content indicates a quota exceeded error
+    /// </summary>
+    private static bool IsQuotaError(string errorContent)
+    {
+        return errorContent.Contains("429") || 
+               errorContent.Contains("quota", StringComparison.OrdinalIgnoreCase) || 
+               errorContent.Contains("Quota exceeded", StringComparison.OrdinalIgnoreCase) || 
+               errorContent.Contains("exceeded your current quota", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Handle HTTP error response and throw appropriate exception
+    /// </summary>
+    private async Task HandleHttpErrorAsync(HttpResponseMessage response, string endpoint, string? symbol = null)
+    {
+        var errorContent = await response.Content.ReadAsStringAsync();
+        var statusCode = response.StatusCode;
+        
+        // Check if it's a quota exceeded error (may be wrapped in 500 from AI service)
+        bool isQuotaError = IsQuotaError(errorContent);
+        
+        // Extract meaningful error message
+        string errorMessage = errorContent;
+        if (statusCode == HttpStatusCode.InternalServerError)
+        {
+            if (isQuotaError)
+            {
+                errorMessage = $"Quota exceeded: {errorContent}";
+                statusCode = HttpStatusCode.TooManyRequests; // 429
+            }
+            // Check if it's a Gemini API error
+            else if (errorContent.Contains("gemini", StringComparison.OrdinalIgnoreCase) || 
+                     errorContent.Contains("models/", StringComparison.OrdinalIgnoreCase))
+            {
+                errorMessage = $"Gemini API error: {errorContent}";
+            }
+            else
+            {
+                errorMessage = $"AI service internal error: {errorContent}";
+            }
+        }
+        
+        // Log based on status code type
+        if (statusCode == HttpStatusCode.NotFound)
+        {
+            var logMessage = symbol != null 
+                ? "AI service endpoint {Endpoint} not found (404) for {Symbol}. Response: {Response}"
+                : "AI service endpoint {Endpoint} not found (404). Response: {Response}";
+            if (symbol != null)
+                _logger.LogWarning(logMessage, endpoint, symbol, errorContent);
+            else
+                _logger.LogWarning(logMessage, endpoint, errorContent);
+        }
+        else if (isQuotaError || statusCode == HttpStatusCode.TooManyRequests)
+        {
+            var logMessage = symbol != null
+                ? "AI service quota exceeded (429) for {Endpoint} with {Symbol}. Response: {Response}"
+                : "AI service quota exceeded (429) for {Endpoint}. Response: {Response}";
+            if (symbol != null)
+                _logger.LogWarning(logMessage, endpoint, symbol, errorContent);
+            else
+                _logger.LogWarning(logMessage, endpoint, errorContent);
+        }
+        else if (statusCode == HttpStatusCode.InternalServerError)
+        {
+            var logMessage = symbol != null
+                ? "AI service returned InternalServerError (500) for {Endpoint} with {Symbol}. This may indicate a Gemini API issue. Response: {Response}"
+                : "AI service returned InternalServerError (500) for {Endpoint}. This may indicate a Gemini API issue. Response: {Response}";
+            if (symbol != null)
+                _logger.LogError(logMessage, endpoint, symbol, errorContent);
+            else
+                _logger.LogError(logMessage, endpoint, errorContent);
+        }
+        else
+        {
+            var logMessage = symbol != null
+                ? "AI service returned {StatusCode} for {Endpoint} with {Symbol}. Response: {Response}"
+                : "AI service returned {StatusCode} for {Endpoint}. Response: {Response}";
+            if (symbol != null)
+                _logger.LogWarning(logMessage, statusCode, endpoint, symbol, errorContent);
+            else
+                _logger.LogWarning(logMessage, statusCode, endpoint, errorContent);
+        }
+        
+        // Create exception with status code information
+        var exception = new HttpRequestException($"AI service returned {statusCode}: {errorMessage}")
+        {
+            Data = { ["StatusCode"] = (int)statusCode }
+        };
+        throw exception;
+    }
+
+    /// <summary>
+    /// Parse forecast response from API
+    /// </summary>
+    private ForecastResult ParseForecastResponse(ForecastApiResponse? result)
+    {
+        if (result == null)
+        {
+            throw new Domain.Exceptions.ExternalServiceException("AI Service", "Failed to get forecast from AI service");
+        }
+
+        return new ForecastResult
+        {
+            Symbol = result.Symbol,
+            Trend = result.Trend,
+            Confidence = result.Confidence,
+            ConfidenceScore = result.ConfidenceScore,
+            TimeHorizon = result.TimeHorizon,
+            Recommendation = result.Recommendation,
+            KeyDrivers = result.KeyDrivers,
+            Risks = result.Risks,
+            Analysis = result.Analysis,
+            GeneratedAt = ParseGeneratedAt(result.GeneratedAt)
+        };
     }
 
     private record SummarizeResponse(string Summary);
@@ -156,6 +339,90 @@ public class AIServiceClient : IAIService
         List<string> KeyDrivers,
         List<string> Risks,
         string Analysis,
+        string GeneratedAt
+    );
+
+    public async Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            EnsureBaseAddressConfigured();
+
+            var request = new
+            {
+                symbol = symbol,
+                technical_data = technicalData ?? new Dictionary<string, string>(),
+                fundamental_data = fundamentalData ?? new Dictionary<string, string>(),
+                sentiment_data = sentimentData ?? new Dictionary<string, string>()
+            };
+
+            var endpoint = "/api/insights/generate";
+            _logger.LogInformation("Calling AI service {Endpoint} for symbol {Symbol}", endpoint, symbol);
+            var startTime = DateTime.UtcNow;
+            var response = await _httpClient.PostAsJsonAsync(endpoint, request, cancellationToken);
+            var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+            _logger.LogInformation("AI service responded for {Symbol} in {ElapsedSeconds:F2} seconds", symbol, elapsed);
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                await HandleHttpErrorAsync(response, endpoint, symbol);
+            }
+            
+            _logger.LogInformation("Successfully received response from AI service for symbol {Symbol}", symbol);
+            
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<InsightApiResponse>();
+
+            if (result == null)
+            {
+                throw new Domain.Exceptions.ExternalServiceException("AI Service", "Failed to get insight from AI service - response was null");
+            }
+
+            _logger.LogInformation("Successfully parsed insight result for {Symbol}: Type={Type}, Confidence={Confidence}", 
+                symbol, result.Type, result.Confidence);
+
+            return new InsightResult
+            {
+                Symbol = result.Symbol,
+                Type = result.Type,
+                Title = result.Title,
+                Description = result.Description,
+                Confidence = result.Confidence,
+                Reasoning = result.Reasoning,
+                TargetPrice = result.TargetPrice,
+                StopLoss = result.StopLoss,
+                GeneratedAt = ParseGeneratedAt(result.GeneratedAt)
+            };
+        }
+        catch (TaskCanceledException timeoutEx)
+        {
+            _logger.LogError(timeoutEx, "Timeout calling AI service for insight generation (symbol: {Symbol}). AI service may be slow or not responding.", symbol);
+            throw new HttpRequestException($"AI service timeout after 120 seconds. Please check if AI service is running at {_httpClient.BaseAddress}", timeoutEx)
+            {
+                Data = { ["StatusCode"] = 408 } // Request Timeout
+            };
+        }
+        catch (HttpRequestException httpEx)
+        {
+            _logger.LogError(httpEx, "HTTP error calling AI service for insight generation (symbol: {Symbol})", symbol);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calling AI service for insight generation (symbol: {Symbol})", symbol);
+            throw;
+        }
+    }
+
+    private record InsightApiResponse(
+        string Symbol,
+        string Type,
+        string Title,
+        string Description,
+        int Confidence,
+        List<string> Reasoning,
+        decimal? TargetPrice,
+        decimal? StopLoss,
         string GeneratedAt
     );
 }

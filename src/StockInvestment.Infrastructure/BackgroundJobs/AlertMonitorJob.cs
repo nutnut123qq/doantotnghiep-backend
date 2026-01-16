@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Domain.Enums;
+using StockInvestment.Infrastructure.Hubs;
 using System.Text.Json;
 
 namespace StockInvestment.Infrastructure.BackgroundJobs;
@@ -129,7 +131,34 @@ public class AlertMonitorJob : BackgroundService
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // TODO: Send notification (Slack, Telegram, Email, etc.)
+        // Send SignalR notification to user
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<TradingHub>>();
+            
+            var notification = new
+            {
+                AlertId = alert.Id,
+                Symbol = alert.Ticker?.Symbol ?? "Unknown",
+                TickerName = alert.Ticker?.Name ?? "Unknown",
+                Type = alert.Type.ToString(),
+                Threshold = alert.Threshold,
+                CurrentPrice = alert.Ticker?.CurrentPrice ?? 0,
+                TriggeredAt = alert.TriggeredAt
+            };
+
+            // Send to specific user's connection group
+            await hubContext.Clients.User(alert.UserId.ToString()).SendAsync("AlertTriggered", notification, cancellationToken);
+            
+            _logger.LogInformation("SignalR notification sent for alert {AlertId} to user {UserId}", alert.Id, alert.UserId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send SignalR notification for alert {AlertId}", alert.Id);
+            // Don't fail the alert trigger if notification fails
+        }
+
         _logger.LogInformation("Alert {AlertId} triggered: {Symbol} {Type} {Threshold}",
             alert.Id, alert.Ticker?.Symbol, alert.Type, alert.Threshold);
     }

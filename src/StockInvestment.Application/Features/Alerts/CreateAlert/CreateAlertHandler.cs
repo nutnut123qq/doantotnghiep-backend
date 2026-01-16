@@ -38,7 +38,7 @@ public class CreateAlertHandler : IRequestHandler<CreateAlertCommand, CreateAler
 
             if (ticker == null)
             {
-                throw new Exception($"Stock symbol {parsedAlert.Symbol} not found");
+                throw new Domain.Exceptions.NotFoundException("StockTicker", parsedAlert.Symbol);
             }
 
             alert = new Alert

@@ -35,15 +35,39 @@ public class NewsSummarizeHandler
                 {
                     _logger.LogInformation("Processing summarization request for news {NewsId}", request.NewsId);
                     
-                    // TODO: Fetch news content from database
-                    // For now, using mock content
+                    // Implementation Status: Currently using mock content
+                    // Future Implementation Plan:
+                    // 1. Dependencies required:
+                    //    - IUnitOfWork or INewsService injected via constructor
+                    //    - Access to News repository/entity
+                    // 2. Implementation steps:
+                    //    a. Fetch News entity from database using request.NewsId
+                    //    b. Extract Content property from News entity
+                    //    c. Pass content to AI service for summarization
+                    // 3. Error handling:
+                    //    - Handle case when News not found (log warning, skip processing)
+                    //    - Handle case when Content is null/empty
+                    // Note: This handler is currently disabled as RabbitMQ is not active.
+                    // When implementing, inject IUnitOfWork or INewsService in constructor.
                     var newsContent = "Sample news content to be summarized";
                     
                     var summary = await _aiService.SummarizeNewsAsync(newsContent);
                     
                     _logger.LogInformation("Summarization completed for news {NewsId}", request.NewsId);
                     
-                    // TODO: Update news record in database with summary
+                    // Implementation Status: Summary not persisted to database
+                    // Future Implementation Plan:
+                    // 1. After receiving summary from AI service:
+                    //    a. Update News entity: Set Summary property with AI-generated summary
+                    //    b. Optionally update Sentiment and ImpactAssessment if provided by AI
+                    //    c. Save changes via UnitOfWork.SaveChangesAsync()
+                    // 2. Error handling:
+                    //    - Handle database update failures
+                    //    - Log errors but don't throw (to avoid message requeue loop)
+                    // 3. Consider:
+                    //    - Adding retry logic for transient database errors
+                    //    - Adding audit trail for summarization attempts
+                    // Note: Depends on database access implementation above.
                 }
             }
             catch (Exception ex)

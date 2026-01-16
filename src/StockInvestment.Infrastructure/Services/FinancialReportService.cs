@@ -27,55 +27,30 @@ public class FinancialReportService : IFinancialReportService
 
     public async Task<IEnumerable<FinancialReport>> GetReportsByTickerAsync(Guid tickerId)
     {
-        try
-        {
-            return await _context.FinancialReports
-                .Where(r => r.TickerId == tickerId)
-                .OrderByDescending(r => r.Year)
-                .ThenByDescending(r => r.Quarter)
-                .ToListAsync();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching financial reports for ticker {TickerId}", tickerId);
-            return Enumerable.Empty<FinancialReport>();
-        }
+        return await _context.FinancialReports
+            .Where(r => r.TickerId == tickerId)
+            .OrderByDescending(r => r.Year)
+            .ThenByDescending(r => r.Quarter)
+            .ToListAsync();
     }
 
     public async Task<IEnumerable<FinancialReport>> GetReportsBySymbolAsync(string symbol)
     {
-        try
-        {
-            var ticker = await _context.StockTickers
-                .FirstOrDefaultAsync(t => t.Symbol == symbol.ToUpper());
+        var ticker = await _context.StockTickers
+            .FirstOrDefaultAsync(t => t.Symbol == symbol.ToUpper());
 
-            if (ticker == null)
-            {
-                _logger.LogWarning("Ticker {Symbol} not found", symbol);
-                return Enumerable.Empty<FinancialReport>();
-            }
-
-            return await GetReportsByTickerAsync(ticker.Id);
-        }
-        catch (Exception ex)
+        if (ticker == null)
         {
-            _logger.LogError(ex, "Error fetching financial reports for symbol {Symbol}", symbol);
-            return Enumerable.Empty<FinancialReport>();
+            throw new Domain.Exceptions.NotFoundException("StockTicker", symbol);
         }
+
+        return await GetReportsByTickerAsync(ticker.Id);
     }
 
     public async Task<FinancialReport?> GetReportByIdAsync(Guid id)
     {
-        try
-        {
-            return await _unitOfWork.Repository<FinancialReport>()
-                .GetByIdAsync(id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching financial report {Id}", id);
-            return null;
-        }
+        return await _unitOfWork.Repository<FinancialReport>()
+            .GetByIdAsync(id);
     }
 
     public async Task<FinancialReport> AddReportAsync(FinancialReport report)
@@ -115,13 +90,11 @@ public class FinancialReportService : IFinancialReportService
 
     public async Task<string> AskQuestionAsync(Guid reportId, string question)
     {
-        try
+        var report = await GetReportByIdAsync(reportId);
+        if (report == null)
         {
-            var report = await GetReportByIdAsync(reportId);
-            if (report == null)
-            {
-                return "Financial report not found.";
-            }
+            throw new Domain.Exceptions.NotFoundException("FinancialReport", reportId);
+        }
 
             // Use AI service to answer question based on report content
             var context = $"Financial Report - {report.ReportType} {report.Year}";
@@ -133,14 +106,8 @@ public class FinancialReportService : IFinancialReportService
 
             var answer = await _aiService.AnswerQuestionAsync(question, context);
             
-            _logger.LogInformation("Answered question for report {ReportId}", reportId);
-            return answer;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error answering question for report {ReportId}", reportId);
-            return "Error processing your question. Please try again.";
-        }
+        _logger.LogInformation("Answered question for report {ReportId}", reportId);
+        return answer;
     }
 }
 

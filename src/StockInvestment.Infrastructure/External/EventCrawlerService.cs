@@ -143,7 +143,7 @@ public class EventCrawlerService : IEventCrawlerService
             {
                 try
                 {
-                    var corporateEvent = ParseVietStockEventRow(row);
+                    var corporateEvent = await ParseVietStockEventRowAsync(row);
                     if (corporateEvent != null)
                     {
                         events.Add(corporateEvent);
@@ -220,7 +220,7 @@ public class EventCrawlerService : IEventCrawlerService
         return events;
     }
 
-    private CorporateEvent? ParseVietStockEventRow(HtmlNode row)
+    private async Task<CorporateEvent?> ParseVietStockEventRowAsync(HtmlNode row)
     {
         try
         {
@@ -237,8 +237,8 @@ public class EventCrawlerService : IEventCrawlerService
 
             // Parse symbol
             var symbol = cells[1].InnerText.Trim();
-            var ticker = _unitOfWork.Repository<StockTicker>().GetAllAsync().Result
-                .FirstOrDefault(t => t.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase));
+            var tickers = await _unitOfWork.Repository<StockTicker>().GetAllAsync();
+            var ticker = tickers.FirstOrDefault(t => t.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase));
 
             if (ticker == null)
                 return null;

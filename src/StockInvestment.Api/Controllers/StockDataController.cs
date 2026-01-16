@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Application.DTOs.StockData;
 
 namespace StockInvestment.Api.Controllers;
 
@@ -10,14 +11,20 @@ namespace StockInvestment.Api.Controllers;
 public class StockDataController : ControllerBase
 {
     private readonly IVNStockService _vnStockService;
+    private readonly ICacheService _cacheService;
     private readonly ILogger<StockDataController> _logger;
+    private readonly ICacheKeyGenerator _cacheKeyGenerator;
 
     public StockDataController(
         IVNStockService vnStockService,
-        ILogger<StockDataController> logger)
+        ICacheService cacheService,
+        ILogger<StockDataController> logger,
+        ICacheKeyGenerator cacheKeyGenerator)
     {
         _vnStockService = vnStockService;
+        _cacheService = cacheService;
         _logger = logger;
+        _cacheKeyGenerator = cacheKeyGenerator;
     }
 
     /// <summary>
@@ -33,32 +40,38 @@ public class StockDataController : ControllerBase
         {
             var start = startDate ?? DateTime.Now.AddMonths(-3);
             var end = endDate ?? DateTime.Now;
+            var cacheKey = _cacheKeyGenerator.GenerateOHLCVKey(symbol, start, end);
 
-            var data = await _vnStockService.GetHistoricalDataAsync(symbol, start, end);
-            
-            // If no data from external service, generate mock data for demo
-            if (data == null || !data.Any())
-            {
-                _logger.LogWarning("No historical data from external service for {Symbol}, using mock data", symbol);
-                data = GenerateMockHistoricalData(symbol, start, end);
-            }
-            
-            var ohlcvData = data.Select(d => new
-            {
-                time = new DateTimeOffset(d.Date).ToUnixTimeSeconds(),
-                open = d.Open,
-                high = d.High,
-                low = d.Low,
-                close = d.Close,
-                volume = d.Volume
-            }).OrderBy(d => d.time);
+            // Get from cache or fetch and cache
+            var ohlcvData = await _cacheService.GetOrSetAsync(
+                cacheKey,
+                async () =>
+                {
+                    _logger.LogDebug("Cache miss for OHLCV data: {CacheKey}, fetching from service", cacheKey);
+                    
+                    var data = await _vnStockService.GetHistoricalDataAsync(symbol, start, end);
+                    
+                    // If no data from external service, generate mock data for demo
+                    if (data == null || !data.Any())
+                    {
+                        _logger.LogWarning("No historical data from external service for {Symbol}, using mock data", symbol);
+                        data = GenerateMockHistoricalData(symbol, start, end);
+                    }
+                    
+                    return data.Select(d => new OHLCVResponseDto
+                    {
+                        Time = new DateTimeOffset(d.Date).ToUnixTimeSeconds(),
+                        Open = d.Open,
+                        High = d.High,
+                        Low = d.Low,
+                        Close = d.Close,
+                        Volume = d.Volume
+                    }).OrderBy(d => d.Time).ToList();
+                },
+                TimeSpan.FromMinutes(30)
+            );
 
             return Ok(ohlcvData);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting OHLCV data for {Symbol}", symbol);
-            return StatusCode(500, "Error fetching chart data");
         }
     }
     
@@ -106,29 +119,43 @@ public class StockDataController : ControllerBase
     {
         try
         {
-            var quote = await _vnStockService.GetQuoteAsync(symbol);
-            if (quote == null)
+            var cacheKey = _cacheKeyGenerator.GenerateQuoteKey(symbol);
+
+            // Get from cache or fetch and cache (5 minutes expiration for real-time data)
+            var quoteDto = await _cacheService.GetOrSetAsync(
+                cacheKey,
+                async () =>
+                {
+                    _logger.LogDebug("Cache miss for quote data: {CacheKey}, fetching from service", cacheKey);
+                    
+                    var quote = await _vnStockService.GetQuoteAsync(symbol);
+                    if (quote == null)
+                    {
+                        return null;
+                    }
+
+                    return new QuoteResponseDto
+                    {
+                        Symbol = quote.Symbol,
+                        Name = quote.Name,
+                        Exchange = quote.Exchange.ToString(),
+                        CurrentPrice = quote.CurrentPrice,
+                        PreviousClose = quote.PreviousClose ?? 0,
+                        Change = quote.Change ?? 0,
+                        ChangePercent = quote.ChangePercent ?? 0,
+                        Volume = quote.Volume ?? 0,
+                        LastUpdated = quote.LastUpdated
+                    };
+                },
+                TimeSpan.FromMinutes(5)
+            );
+
+            if (quoteDto == null)
             {
                 return NotFound($"Symbol {symbol} not found");
             }
 
-            return Ok(new
-            {
-                symbol = quote.Symbol,
-                name = quote.Name,
-                exchange = quote.Exchange.ToString(),
-                currentPrice = quote.CurrentPrice,
-                previousClose = quote.PreviousClose,
-                change = quote.Change,
-                changePercent = quote.ChangePercent,
-                volume = quote.Volume,
-                lastUpdated = quote.LastUpdated
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting quote for {Symbol}", symbol);
-            return StatusCode(500, "Error fetching quote");
+            return Ok(quoteDto);
         }
     }
 
@@ -151,11 +178,7 @@ public class StockDataController : ControllerBase
 
             return Ok(symbolList);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting symbols");
-            return StatusCode(500, "Error fetching symbols");
-        }
     }
+
 }
 

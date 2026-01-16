@@ -34,5 +34,10 @@ public interface ICacheService
     /// Get or set cached value
     /// </summary>
     Task<T> GetOrSetAsync<T>(string key, Func<Task<T>> factory, TimeSpan? expiration = null, CancellationToken cancellationToken = default) where T : class;
+
+    /// <summary>
+    /// Increment a numeric value in cache (for rate limiting)
+    /// </summary>
+    Task<long> IncrementAsync(string key, TimeSpan? expiration = null, CancellationToken cancellationToken = default);
 }
 

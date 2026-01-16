@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Features.Alerts.CreateAlert;
 using StockInvestment.Application.Features.Alerts.GetAlerts;
+using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Enums;
 using System.Security.Claims;
 
@@ -14,11 +15,13 @@ namespace StockInvestment.Api.Controllers;
 public class AlertController : ControllerBase
 {
     private readonly IMediator _mediator;
+    private readonly IAIService _aiService;
     private readonly ILogger<AlertController> _logger;
 
-    public AlertController(IMediator mediator, ILogger<AlertController> logger)
+    public AlertController(IMediator mediator, IAIService aiService, ILogger<AlertController> logger)
     {
         _mediator = mediator;
+        _aiService = aiService;
         _logger = logger;
     }
 
@@ -42,6 +45,29 @@ public class AlertController : ControllerBase
 
         var result = await _mediator.Send(query);
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Parse natural language alert input without creating the alert
+    /// </summary>
+    [HttpPost("parse")]
+    public async Task<IActionResult> ParseAlert([FromBody] ParseAlertRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.NaturalLanguageInput))
+        {
+            return BadRequest("NaturalLanguageInput is required");
+        }
+
+        try
+        {
+            var parsedAlert = await _aiService.ParseAlertAsync(request.NaturalLanguageInput);
+            return Ok(parsedAlert);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error parsing alert");
+            return BadRequest(ex.Message);
+        }
     }
 
     /// <summary>
@@ -84,6 +110,11 @@ public class AlertController : ControllerBase
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         return Guid.TryParse(userIdClaim, out var userId) ? userId : Guid.Empty;
     }
+}
+
+public class ParseAlertRequest
+{
+    public string NaturalLanguageInput { get; set; } = string.Empty;
 }
 
 public class CreateAlertRequest

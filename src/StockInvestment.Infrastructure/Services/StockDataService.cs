@@ -38,17 +38,56 @@ public class StockDataService : IStockDataService
 
                 if (watchlist != null)
                 {
+                    // Nếu có cả index filter, lấy intersection
+                    if (!string.IsNullOrEmpty(index))
+                    {
+                        var indexSymbols = IndexConstituentProvider.GetSymbols(index);
+                        var filteredTickers = watchlist.Tickers
+                            .Where(t => indexSymbols.Contains(t.Symbol, StringComparer.OrdinalIgnoreCase))
+                            .ToList();
+                        return filteredTickers;
+                    }
+                    
                     return watchlist.Tickers;
                 }
             }
 
-            // Lấy từ cache hoặc VNStock API
-            var cacheKey = $"tickers_{exchange}_{industry}";
+            // Lấy từ cache hoặc VNStock API - include index in cache key
+            var cacheKey = $"tickers_{exchange}_{index}_{industry}";
             var cachedTickers = await _cacheService.GetAsync<List<StockTicker>>(cacheKey);
 
             if (cachedTickers != null)
             {
                 return cachedTickers;
+            }
+
+            // Nếu có index filter, lấy danh sách theo index
+            if (!string.IsNullOrEmpty(index))
+            {
+                var indexSymbols = IndexConstituentProvider.GetSymbols(index);
+                if (!indexSymbols.Any())
+                {
+                    _logger.LogWarning("No symbols found for index {Index}", index);
+                    return Enumerable.Empty<StockTicker>();
+                }
+
+                // Fetch quotes cho các symbols trong index
+                var indexQuotes = await _vnStockService.GetQuotesAsync(indexSymbols);
+                var indexTickers = indexQuotes.ToList();
+
+                // Filter thêm theo exchange nếu có
+                if (!string.IsNullOrEmpty(exchange))
+                {
+                    indexTickers = indexTickers
+                        .Where(t => t.Exchange.ToString().Equals(exchange, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                }
+
+                // Cache 2 phút
+                await _cacheService.SetAsync(cacheKey, indexTickers, TimeSpan.FromMinutes(2));
+
+                _logger.LogInformation("Fetched {Count} tickers for index {Index}", indexTickers.Count, index);
+                return indexTickers;
             }
 
             // Ưu tiên lấy từ database trước (nếu có dữ liệu đã được cập nhật)

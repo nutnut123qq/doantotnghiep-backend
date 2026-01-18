@@ -3,7 +3,9 @@ namespace StockInvestment.Application.Interfaces;
 public interface IAIService
 {
     Task<string> SummarizeNewsAsync(string newsContent, CancellationToken cancellationToken = default);
+    Task<NewsSummaryResult> SummarizeNewsDetailedAsync(string newsContent, CancellationToken cancellationToken = default);
     Task<string> AnalyzeEventAsync(string eventDescription, CancellationToken cancellationToken = default);
+    Task<EventAnalysisResult> AnalyzeEventDetailedAsync(string eventDescription, CancellationToken cancellationToken = default);
     Task<object> GenerateForecastAsync(Guid tickerId, CancellationToken cancellationToken = default);
     Task<ForecastResult> GenerateForecastBySymbolAsync(string symbol, string timeHorizon = "short", CancellationToken cancellationToken = default);
     Task<ForecastResult> GenerateForecastWithDataAsync(string symbol, string timeHorizon, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
@@ -46,5 +48,19 @@ public class InsightResult
     public decimal? TargetPrice { get; set; }
     public decimal? StopLoss { get; set; }
     public DateTime GeneratedAt { get; set; }
+}
+
+public class NewsSummaryResult
+{
+    public string Summary { get; set; } = string.Empty;
+    public string Sentiment { get; set; } = string.Empty; // positive, negative, neutral
+    public string ImpactAssessment { get; set; } = string.Empty;
+    public List<string>? KeyPoints { get; set; }
+}
+
+public class EventAnalysisResult
+{
+    public string Analysis { get; set; } = string.Empty;
+    public string Impact { get; set; } = string.Empty;
 }
 

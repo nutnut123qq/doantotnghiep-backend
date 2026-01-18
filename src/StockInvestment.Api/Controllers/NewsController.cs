@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Enums;
 using StockInvestment.Infrastructure.Messaging;
 
 namespace StockInvestment.Api.Controllers;
@@ -9,15 +10,18 @@ namespace StockInvestment.Api.Controllers;
 public class NewsController : ControllerBase
 {
     private readonly INewsService _newsService;
+    private readonly IAIService? _aiService;
     private readonly RabbitMQService? _rabbitMQService;
     private readonly ILogger<NewsController> _logger;
 
     public NewsController(
         INewsService newsService,
         ILogger<NewsController> logger,
+        IAIService? aiService = null,
         RabbitMQService? rabbitMQService = null)
     {
         _newsService = newsService;
+        _aiService = aiService;
         _rabbitMQService = rabbitMQService;
         _logger = logger;
     }
@@ -42,27 +46,76 @@ public class NewsController : ControllerBase
         }
     }
 
-    [HttpPost("{id}/summarize")]
-    public Task<IActionResult> RequestSummarization(Guid id)
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetNewsById(Guid id)
     {
         try
         {
-            // Publish message to queue for async processing
-            if (_rabbitMQService != null)
-            {
-                _rabbitMQService.Publish("news_summarize", new { NewsId = id });
-                return Task.FromResult<IActionResult>(Accepted(new { message = "Summarization request queued", newsId = id }));
-            }
-            else
-            {
-                return Task.FromResult<IActionResult>(Accepted(new { message = "Message queue unavailable, summarization disabled", newsId = id }));
-            }
+            var news = await _newsService.GetNewsByIdAsync(id);
+            if (news == null)
+                return NotFound($"News with ID {id} not found");
+                
+            return Ok(news);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error queuing summarization request for news {Id}", id);
-            return Task.FromResult<IActionResult>(StatusCode(500, "An error occurred while queuing summarization"));
+            _logger.LogError(ex, "Error fetching news {Id}", id);
+            return StatusCode(500, "An error occurred while retrieving news");
         }
+    }
+
+    [HttpPost("{id}/summarize")]
+    public async Task<IActionResult> RequestSummarization(Guid id)
+    {
+        try
+        {
+            // Nếu có RabbitMQ, queue như cũ
+            if (_rabbitMQService != null)
+            {
+                _rabbitMQService.Publish("news_summarize", new { NewsId = id });
+                return Accepted(new { message = "Summarization request queued", newsId = id });
+            }
+            
+            // Fallback sync nếu không có RabbitMQ
+            if (_aiService == null)
+            {
+                return StatusCode(503, "AI service is not available");
+            }
+
+            var news = await _newsService.GetNewsByIdAsync(id);
+            if (news == null)
+                return NotFound($"News with ID {id} not found");
+                
+            // Call AI service
+            var summaryResult = await _aiService.SummarizeNewsDetailedAsync(news.Content);
+            
+            // Update DB
+            news.Summary = summaryResult.Summary;
+            news.Sentiment = ParseSentiment(summaryResult.Sentiment);
+            news.ImpactAssessment = summaryResult.ImpactAssessment;
+            await _newsService.UpdateNewsAsync(news);
+            
+            return Ok(summaryResult);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error summarizing news {Id}", id);
+            return StatusCode(500, "An error occurred while summarizing news");
+        }
+    }
+
+    private Sentiment? ParseSentiment(string sentimentString)
+    {
+        if (string.IsNullOrWhiteSpace(sentimentString))
+            return null;
+
+        return sentimentString.ToLower() switch
+        {
+            "positive" => Sentiment.Positive,
+            "negative" => Sentiment.Negative,
+            "neutral" => Sentiment.Neutral,
+            _ => Sentiment.Neutral
+        };
     }
 }
 

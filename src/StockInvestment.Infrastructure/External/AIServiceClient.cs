@@ -32,6 +32,31 @@ public class AIServiceClient : IAIService
         }
     }
 
+    public async Task<NewsSummaryResult> SummarizeNewsDetailedAsync(string newsContent, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync("/api/summarize", 
+                new { content = newsContent }, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            
+            var result = await response.Content.ReadFromJsonAsync<SummarizeDetailedResponse>(cancellationToken);
+            
+            return new NewsSummaryResult
+            {
+                Summary = result?.Summary ?? string.Empty,
+                Sentiment = result?.Sentiment ?? "neutral",
+                ImpactAssessment = result?.ImpactAssessment ?? result?.Impact_Assessment ?? string.Empty,
+                KeyPoints = result?.KeyPoints ?? result?.Key_Points ?? new List<string>()
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calling AI service for detailed news summarization");
+            throw;
+        }
+    }
+
     public async Task<string> AnalyzeEventAsync(string eventDescription, CancellationToken cancellationToken = default)
     {
         try
@@ -44,6 +69,29 @@ public class AIServiceClient : IAIService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error calling AI service for event analysis");
+            throw;
+        }
+    }
+
+    public async Task<EventAnalysisResult> AnalyzeEventDetailedAsync(string eventDescription, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync("/api/analyze-event", 
+                new { description = eventDescription }, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            
+            var result = await response.Content.ReadFromJsonAsync<AnalyzeEventDetailedResponse>(cancellationToken);
+            
+            return new EventAnalysisResult
+            {
+                Analysis = result?.Analysis ?? string.Empty,
+                Impact = result?.Impact ?? string.Empty
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calling AI service for detailed event analysis");
             throw;
         }
     }
@@ -326,7 +374,16 @@ public class AIServiceClient : IAIService
     }
 
     private record SummarizeResponse(string Summary);
+    private record SummarizeDetailedResponse(
+        string Summary, 
+        string Sentiment, 
+        string? ImpactAssessment,
+        string? Impact_Assessment,  // snake_case version from FastAPI
+        List<string>? KeyPoints,
+        List<string>? Key_Points  // snake_case version from FastAPI
+    );
     private record AnalyzeResponse(string Analysis);
+    private record AnalyzeEventDetailedResponse(string Analysis, string Impact);
     private record QAResponse(string Answer);
     private record ParseAlertApiResponse(string Ticker, string Condition, decimal Threshold, string Timeframe, string AlertType);
     private record ForecastApiResponse(

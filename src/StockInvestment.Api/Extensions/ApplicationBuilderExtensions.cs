@@ -97,8 +97,10 @@ public static class ApplicationBuilderExtensions
     public static WebApplication MapEndpoints(this WebApplication app)
     {
         app.MapControllers();
-        app.MapHub<StockPriceHub>("/hubs/stock-price");
+        // Map TradingHub to both paths for backward compatibility
+        app.MapHub<TradingHub>("/hubs/stock-price");
         app.MapHub<TradingHub>("/hubs/trading");
+        app.MapHub<WorkspaceHub>("/hubs/workspace");
 
         return app;
     }

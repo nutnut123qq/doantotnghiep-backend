@@ -5,6 +5,7 @@ using StockInvestment.Application.Features.CorporateEvents.CreateEvent;
 using StockInvestment.Application.Features.CorporateEvents.GetCorporateEvents;
 using StockInvestment.Application.Features.CorporateEvents.GetEventById;
 using StockInvestment.Application.Features.CorporateEvents.GetUpcomingEvents;
+using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
 
 namespace StockInvestment.Api.Controllers;
@@ -15,11 +16,16 @@ namespace StockInvestment.Api.Controllers;
 public class CorporateEventController : ControllerBase
 {
     private readonly IMediator _mediator;
+    private readonly IAIService? _aiService;
     private readonly ILogger<CorporateEventController> _logger;
 
-    public CorporateEventController(IMediator mediator, ILogger<CorporateEventController> logger)
+    public CorporateEventController(
+        IMediator mediator, 
+        ILogger<CorporateEventController> logger,
+        IAIService? aiService = null)
     {
         _mediator = mediator;
+        _aiService = aiService;
         _logger = logger;
     }
 
@@ -127,6 +133,45 @@ public class CorporateEventController : ControllerBase
         {
             _logger.LogError(ex, "Error creating corporate event");
             return StatusCode(500, "An error occurred while creating the event");
+        }
+    }
+
+    /// <summary>
+    /// Analyze corporate event with AI
+    /// </summary>
+    /// <param name="id">Event ID</param>
+    /// <returns>AI analysis result</returns>
+    [HttpPost("{id}/analyze")]
+    public async Task<IActionResult> AnalyzeEvent(Guid id)
+    {
+        try
+        {
+            if (_aiService == null)
+            {
+                return StatusCode(503, "AI service is not available");
+            }
+
+            var query = new GetEventByIdQuery(id);
+            var corporateEvent = await _mediator.Send(query);
+            
+            if (corporateEvent == null)
+                return NotFound($"Event with ID {id} not found");
+                
+            // Build description for AI analysis
+            var description = $"{corporateEvent.Title}\n{corporateEvent.Description}\n" +
+                             $"Type: {corporateEvent.EventType}\nDate: {corporateEvent.EventDate}";
+            if (!string.IsNullOrEmpty(corporateEvent.AdditionalData))
+                description += $"\nDetails: {corporateEvent.AdditionalData}";
+                
+            // Call AI service
+            var analysisResult = await _aiService.AnalyzeEventDetailedAsync(description);
+            
+            return Ok(analysisResult);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error analyzing event {Id}", id);
+            return StatusCode(500, "An error occurred while analyzing the event");
         }
     }
 }

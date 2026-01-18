@@ -9,11 +9,13 @@ public class Layout
     public bool IsDefault { get; set; }
     public bool IsShared { get; set; }
     public string? ShareCode { get; set; }
+    public Guid? WorkspaceId { get; set; } // Optional: link to workspace
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 
     // Navigation properties
     public User User { get; set; } = null!;
+    public Workspace? Workspace { get; set; }
 
     public Layout()
     {

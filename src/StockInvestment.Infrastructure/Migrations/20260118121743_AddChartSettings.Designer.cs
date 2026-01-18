@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StockInvestment.Infrastructure.Data;
@@ -11,9 +12,11 @@ using StockInvestment.Infrastructure.Data;
 namespace StockInvestment.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260118121743_AddChartSettings")]
+    partial class AddChartSettings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -491,14 +494,9 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("WorkspaceId")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
 
                     b.HasIndex("UserId");
-
-                    b.HasIndex("WorkspaceId");
 
                     b.ToTable("Layouts", (string)null);
                 });
@@ -844,147 +842,6 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.ToTable("Watchlists", (string)null);
                 });
 
-            modelBuilder.Entity("StockInvestment.Domain.Entities.Workspace", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("OwnerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OwnerId");
-
-                    b.ToTable("Workspaces", (string)null);
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.WorkspaceLayout", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("AddedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("AddedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("LayoutId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("WorkspaceId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LayoutId");
-
-                    b.HasIndex("WorkspaceId", "LayoutId")
-                        .IsUnique();
-
-                    b.ToTable("WorkspaceLayouts", (string)null);
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.WorkspaceMember", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("JoinedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("Role")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("WorkspaceId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("WorkspaceId", "UserId")
-                        .IsUnique();
-
-                    b.ToTable("WorkspaceMembers", (string)null);
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.WorkspaceMessage", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Content")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("WorkspaceId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("WorkspaceId");
-
-                    b.ToTable("WorkspaceMessages", (string)null);
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.WorkspaceWatchlist", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("AddedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("AddedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("WatchlistId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("WorkspaceId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("WatchlistId");
-
-                    b.HasIndex("WorkspaceId", "WatchlistId")
-                        .IsUnique();
-
-                    b.ToTable("WorkspaceWatchlists", (string)null);
-                });
-
             modelBuilder.Entity("StockTickerWatchlist", b =>
                 {
                     b.Property<Guid>("TickersId")
@@ -1228,13 +1085,7 @@ namespace StockInvestment.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("StockInvestment.Domain.Entities.Workspace", "Workspace")
-                        .WithMany()
-                        .HasForeignKey("WorkspaceId");
-
                     b.Navigation("User");
-
-                    b.Navigation("Workspace");
                 });
 
             modelBuilder.Entity("StockInvestment.Domain.Entities.News", b =>
@@ -1290,93 +1141,6 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("StockInvestment.Domain.Entities.Workspace", b =>
-                {
-                    b.HasOne("StockInvestment.Domain.Entities.User", "Owner")
-                        .WithMany()
-                        .HasForeignKey("OwnerId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Owner");
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.WorkspaceLayout", b =>
-                {
-                    b.HasOne("StockInvestment.Domain.Entities.Layout", "Layout")
-                        .WithMany()
-                        .HasForeignKey("LayoutId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("StockInvestment.Domain.Entities.Workspace", "Workspace")
-                        .WithMany("Layouts")
-                        .HasForeignKey("WorkspaceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Layout");
-
-                    b.Navigation("Workspace");
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.WorkspaceMember", b =>
-                {
-                    b.HasOne("StockInvestment.Domain.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("StockInvestment.Domain.Entities.Workspace", "Workspace")
-                        .WithMany("Members")
-                        .HasForeignKey("WorkspaceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-
-                    b.Navigation("Workspace");
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.WorkspaceMessage", b =>
-                {
-                    b.HasOne("StockInvestment.Domain.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("StockInvestment.Domain.Entities.Workspace", "Workspace")
-                        .WithMany("Messages")
-                        .HasForeignKey("WorkspaceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-
-                    b.Navigation("Workspace");
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.WorkspaceWatchlist", b =>
-                {
-                    b.HasOne("StockInvestment.Domain.Entities.Watchlist", "Watchlist")
-                        .WithMany()
-                        .HasForeignKey("WatchlistId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("StockInvestment.Domain.Entities.Workspace", "Workspace")
-                        .WithMany("Watchlists")
-                        .HasForeignKey("WorkspaceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Watchlist");
-
-                    b.Navigation("Workspace");
-                });
-
             modelBuilder.Entity("StockTickerWatchlist", b =>
                 {
                     b.HasOne("StockInvestment.Domain.Entities.StockTicker", null)
@@ -1414,17 +1178,6 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.Navigation("DismissedAIInsights");
 
                     b.Navigation("Layouts");
-
-                    b.Navigation("Watchlists");
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.Workspace", b =>
-                {
-                    b.Navigation("Layouts");
-
-                    b.Navigation("Members");
-
-                    b.Navigation("Messages");
 
                     b.Navigation("Watchlists");
                 });

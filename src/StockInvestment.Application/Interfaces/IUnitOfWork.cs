@@ -36,6 +36,16 @@ public interface IUnitOfWork : IDisposable
     IDataSourceRepository DataSources { get; }
 
     /// <summary>
+    /// Chart Settings repository
+    /// </summary>
+    IChartSettingsRepository ChartSettings { get; }
+
+    /// <summary>
+    /// Workspace repository
+    /// </summary>
+    IWorkspaceRepository Workspaces { get; }
+
+    /// <summary>
     /// Generic repository for any entity type
     /// </summary>
     IRepository<T> Repository<T>() where T : class;

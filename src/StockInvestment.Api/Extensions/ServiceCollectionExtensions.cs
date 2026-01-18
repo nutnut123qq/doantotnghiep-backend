@@ -153,7 +153,9 @@ public static class ServiceCollectionExtensions
             ?? "localhost:6379";
         services.AddSingleton<IConnectionMultiplexer>(sp =>
             ConnectionMultiplexer.Connect(redisConnection));
-        services.AddScoped<ICacheService, RedisCacheService>();
+        // Register as Singleton since it's used in middleware (which is resolved from root provider)
+        // and RedisCacheService is stateless and thread-safe
+        services.AddSingleton<ICacheService, RedisCacheService>();
 
         return services;
     }

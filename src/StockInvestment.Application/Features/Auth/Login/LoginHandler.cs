@@ -54,7 +54,12 @@ public class LoginHandler : IRequestHandler<LoginCommand, LoginDto>
             throw new UnauthorizedException("Account is deactivated");
         }
 
-        if (!user.IsEmailVerified)
+        // Skip email verification check in Development mode for easier testing
+        var environment = _configuration["ASPNETCORE_ENVIRONMENT"] ?? string.Empty;
+        var isDevelopment = environment.Equals("Development", StringComparison.OrdinalIgnoreCase);
+        var skipEmailVerification = _configuration["Auth:SkipEmailVerification"]?.Equals("true", StringComparison.OrdinalIgnoreCase) ?? false;
+        
+        if (!user.IsEmailVerified && !(isDevelopment && skipEmailVerification))
         {
             _logger.LogWarning("Login attempt failed: Email not verified for email {Email}", email.Value);
             throw new UnauthorizedException("Please verify your email before logging in. Check your inbox for the verification link.");

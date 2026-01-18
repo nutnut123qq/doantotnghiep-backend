@@ -5,6 +5,7 @@ using StockInvestment.Application.Features.Auth.Register;
 using StockInvestment.Application.Features.Auth.VerifyEmail;
 using StockInvestment.Application.Features.Auth.ResendVerification;
 using StockInvestment.Api.Middleware;
+using StockInvestment.Application.Interfaces;
 
 namespace StockInvestment.Api.Controllers;
 
@@ -14,11 +15,38 @@ public class AuthController : ControllerBase
 {
     private readonly IMediator _mediator;
     private readonly ILogger<AuthController> _logger;
+    private readonly ICacheService _cacheService;
 
-    public AuthController(IMediator mediator, ILogger<AuthController> logger)
+    public AuthController(
+        IMediator mediator, 
+        ILogger<AuthController> logger,
+        ICacheService cacheService)
     {
         _mediator = mediator;
         _logger = logger;
+        _cacheService = cacheService;
+    }
+
+    private string GetClientIpAddress()
+    {
+        // Check for forwarded IP (when behind proxy/load balancer)
+        var forwardedFor = Request.Headers["X-Forwarded-For"].FirstOrDefault();
+        if (!string.IsNullOrEmpty(forwardedFor))
+        {
+            var ips = forwardedFor.Split(',');
+            if (ips.Length > 0)
+            {
+                return ips[0].Trim();
+            }
+        }
+
+        var realIp = Request.Headers["X-Real-IP"].FirstOrDefault();
+        if (!string.IsNullOrEmpty(realIp))
+        {
+            return realIp;
+        }
+
+        return HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
     }
 
     /// <summary>
@@ -43,8 +71,33 @@ public class AuthController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login([FromBody] LoginCommand command)
     {
-        var result = await _mediator.Send(command);
-        return Ok(result);
+        try
+        {
+            var result = await _mediator.Send(command);
+            
+            // Clear rate limit for this IP on successful login only
+            // This allows users who were rate limited to try again immediately after successful login
+            try
+            {
+                var clientIp = GetClientIpAddress();
+                var rateLimitKey = $"rate_limit:auth:{clientIp}";
+                await _cacheService.RemoveAsync(rateLimitKey);
+                _logger.LogDebug("Cleared rate limit for IP {ClientIp} after successful login", clientIp);
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail the login if rate limit clearing fails
+                _logger.LogWarning(ex, "Failed to clear rate limit after successful login");
+            }
+            
+            return Ok(result);
+        }
+        catch (Exception)
+        {
+            // Re-throw to let GlobalExceptionHandlerMiddleware handle it
+            // Don't clear rate limit on failed login attempts
+            throw;
+        }
     }
 
     /// <summary>

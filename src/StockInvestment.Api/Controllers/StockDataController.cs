@@ -126,39 +126,37 @@ public class StockDataController : ControllerBase
         {
             var cacheKey = _cacheKeyGenerator.GenerateQuoteKey(symbol);
 
-            // Get from cache or fetch and cache (5 minutes expiration for real-time data)
-            var quoteDto = await _cacheService.GetOrSetAsync(
-                cacheKey,
-                async () =>
-                {
-                    _logger.LogDebug("Cache miss for quote data: {CacheKey}, fetching from service", cacheKey);
-                    
-                    var quote = await _vnStockService.GetQuoteAsync(symbol);
-                    if (quote == null)
-                    {
-                        return null;
-                    }
-
-                    return new QuoteResponseDto
-                    {
-                        Symbol = quote.Symbol,
-                        Name = quote.Name,
-                        Exchange = quote.Exchange.ToString(),
-                        CurrentPrice = quote.CurrentPrice,
-                        PreviousClose = quote.PreviousClose ?? 0,
-                        Change = quote.Change ?? 0,
-                        ChangePercent = quote.ChangePercent ?? 0,
-                        Volume = quote.Volume ?? 0,
-                        LastUpdated = quote.LastUpdated
-                    };
-                },
-                TimeSpan.FromMinutes(5)
-            );
-
-            if (quoteDto == null)
+            // Try to get from cache first
+            var cachedQuote = await _cacheService.GetAsync<QuoteResponseDto>(cacheKey);
+            if (cachedQuote != null)
             {
-                return NotFound($"Symbol {symbol} not found");
+                return Ok(cachedQuote);
             }
+
+            // Cache miss - fetch from service
+            _logger.LogDebug("Cache miss for quote data: {CacheKey}, fetching from service", cacheKey);
+            
+            var quote = await _vnStockService.GetQuoteAsync(symbol);
+            if (quote == null)
+            {
+                return NotFound(new { message = $"Quote not found for symbol: {symbol}" });
+            }
+
+            var quoteDto = new QuoteResponseDto
+            {
+                Symbol = quote.Symbol,
+                Name = quote.Name,
+                Exchange = quote.Exchange.ToString(),
+                CurrentPrice = quote.CurrentPrice,
+                PreviousClose = quote.PreviousClose ?? 0,
+                Change = quote.Change ?? 0,
+                ChangePercent = quote.ChangePercent ?? 0,
+                Volume = quote.Volume ?? 0,
+                LastUpdated = quote.LastUpdated
+            };
+
+            // Cache the result (5 minutes expiration for real-time data)
+            await _cacheService.SetAsync(cacheKey, quoteDto, TimeSpan.FromMinutes(5));
 
             return Ok(quoteDto);
         }

@@ -96,7 +96,7 @@ public class AlertController : ControllerBase
         try
         {
             var result = await _mediator.Send(command);
-            return CreatedAtAction(nameof(GetAlerts), new { id = result.Id }, result);
+            return Created("", result);
         }
         catch (Exception ex)
         {

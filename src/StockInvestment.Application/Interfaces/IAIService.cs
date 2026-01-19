@@ -1,3 +1,5 @@
+using StockInvestment.Application.Contracts.AI;
+
 namespace StockInvestment.Application.Interfaces;
 
 public interface IAIService
@@ -9,9 +11,10 @@ public interface IAIService
     Task<object> GenerateForecastAsync(Guid tickerId, CancellationToken cancellationToken = default);
     Task<ForecastResult> GenerateForecastBySymbolAsync(string symbol, string timeHorizon = "short", CancellationToken cancellationToken = default);
     Task<ForecastResult> GenerateForecastWithDataAsync(string symbol, string timeHorizon, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
-    Task<string> AnswerQuestionAsync(string question, string context, CancellationToken cancellationToken = default);
+    Task<QuestionAnswerResult> AnswerQuestionAsync(string question, string context, CancellationToken cancellationToken = default);
     Task<ParsedAlert> ParseAlertAsync(string naturalLanguageInput, CancellationToken cancellationToken = default);
     Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
+    Task<string?> GetAlertExplanationAsync(string symbol, string alertType, decimal currentValue, decimal threshold, CancellationToken cancellationToken = default);
 }
 
 public class ParsedAlert

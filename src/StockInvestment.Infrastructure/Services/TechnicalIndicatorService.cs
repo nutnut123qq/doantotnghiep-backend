@@ -21,11 +21,11 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
     {
         try
         {
-            var endDate = DateTime.Now;
+            var endDate = DateTime.UtcNow;
             var startDate = endDate.AddDays(-(period + 10)); // Extra days for calculation
 
             var historicalData = await _vnStockService.GetHistoricalDataAsync(symbol, startDate, endDate);
-            var dataList = historicalData.ToList();
+            var dataList = historicalData.OrderBy(d => d.Date).ToList();
 
             if (dataList.Count < period)
             {
@@ -49,7 +49,7 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
     {
         try
         {
-            var endDate = DateTime.Now;
+            var endDate = DateTime.UtcNow;
             var startDate = endDate.AddDays(-(period + 20));
 
             var historicalData = await _vnStockService.GetHistoricalDataAsync(symbol, startDate, endDate);
@@ -101,28 +101,62 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
     {
         try
         {
-            var endDate = DateTime.Now;
-            var startDate = endDate.AddDays(-(slowPeriod + signalPeriod + 20));
+            var endDate = DateTime.UtcNow;
+            var startDate = endDate.AddDays(-(slowPeriod + signalPeriod + 30));
 
             var historicalData = await _vnStockService.GetHistoricalDataAsync(symbol, startDate, endDate);
             var dataList = historicalData.OrderBy(d => d.Date).ToList();
 
-            if (dataList.Count < slowPeriod + signalPeriod)
+            // 1. Check insufficient data (cần +1 để tránh edge case)
+            var prices = dataList.Select(d => d.Close).ToList();
+            if (prices.Count < slowPeriod + signalPeriod + 1)
             {
-                _logger.LogWarning("Not enough data to calculate MACD for {Symbol}", symbol);
+                _logger.LogWarning("Not enough data to calculate MACD for {Symbol}. Need at least {Required} points",
+                    symbol, slowPeriod + signalPeriod + 1);
                 return new MACDResult();
             }
 
-            // Calculate EMAs
-            var fastEMA = CalculateEMA(dataList.Select(d => d.Close).ToList(), fastPeriod);
-            var slowEMA = CalculateEMA(dataList.Select(d => d.Close).ToList(), slowPeriod);
+            // 2. Tính chuỗi EMA với startIndex
+            var (fastStart, fastEMA) = CalculateEMASeries(prices, fastPeriod);
+            var (slowStart, slowEMA) = CalculateEMASeries(prices, slowPeriod);
 
-            var macdLine = fastEMA - slowEMA;
+            // Guard: nếu EMA trả -1 hoặc empty (period > prices.Count)
+            if (fastStart < 0 || slowStart < 0 || fastEMA.Count == 0 || slowEMA.Count == 0)
+            {
+                _logger.LogWarning("Failed to calculate EMA series for {Symbol}", symbol);
+                return new MACDResult();
+            }
 
-            // Calculate signal line (EMA of MACD)
-            var macdValues = new List<decimal> { macdLine };
-            var signalLine = macdLine; // Simplified - should calculate EMA of MACD values
+            // 3. Align series từ max(fastStart, slowStart)
+            var start = Math.Max(fastStart, slowStart); // thường = 25
+            var macdSeries = new List<decimal>();
 
+            for (int idx = start; idx < prices.Count; idx++)
+            {
+                var fastVal = fastEMA[idx - fastStart];  // align đúng
+                var slowVal = slowEMA[idx - slowStart];
+                macdSeries.Add(fastVal - slowVal);
+            }
+
+            // 4. Tính Signal = EMA9 của MACD
+            // Check đủ dữ liệu cho signal trước khi tính
+            if (macdSeries.Count < signalPeriod)
+            {
+                _logger.LogWarning("Not enough MACD data to calculate signal for {Symbol}", symbol);
+                return new MACDResult();
+            }
+
+            var (_, signalSeries) = CalculateEMASeries(macdSeries, signalPeriod);
+
+            if (signalSeries.Count == 0)
+            {
+                _logger.LogWarning("Failed to calculate signal for {Symbol}", symbol);
+                return new MACDResult();
+            }
+
+            // 5. Lấy giá trị cuối
+            var macdLine = macdSeries.Last();
+            var signalLine = signalSeries.Last();
             var histogram = macdLine - signalLine;
 
             return new MACDResult
@@ -162,10 +196,14 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
         var indicators = new List<TechnicalIndicator>();
         var trend = GetTrendAssessment(rsi, macd);
 
+        // MACD trend với epsilon để tránh coi histogram ≈ 0 là Bearish
+        var macdTrend = macd.Histogram > 0.0001m ? "Bullish" :
+                        macd.Histogram < -0.0001m ? "Bearish" : "Neutral";
+
         indicators.Add(CreateIndicatorEntity("MA20", ma20, trend));
         indicators.Add(CreateIndicatorEntity("MA50", ma50, trend));
         indicators.Add(CreateIndicatorEntity("RSI", rsi, GetRSITrend(rsi)));
-        indicators.Add(CreateIndicatorEntity("MACD", macd.MACD, macd.Histogram > 0 ? "Bullish" : "Bearish"));
+        indicators.Add(CreateIndicatorEntity("MACD", macd.MACD, macdTrend));
 
         return indicators;
     }
@@ -221,5 +259,25 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
         }
 
         return ema;
+    }
+
+    private (int startIndex, List<decimal> values) CalculateEMASeries(List<decimal> prices, int period)
+    {
+        if (prices.Count < period)
+            return (-1, new List<decimal>());
+
+        var multiplier = 2m / (period + 1);
+        var ema = prices.Take(period).Average(); // EMA initial = SMA
+        var values = new List<decimal> { ema };
+
+        for (int i = period; i < prices.Count; i++)
+        {
+            ema = (prices[i] - ema) * multiplier + ema;
+            values.Add(ema);
+        }
+
+        // startIndex = period - 1: EMA bắt đầu từ điểm này trong timeline gốc
+        // VD: EMA12 bắt đầu từ index 11, EMA26 từ index 25
+        return (period - 1, values);
     }
 }

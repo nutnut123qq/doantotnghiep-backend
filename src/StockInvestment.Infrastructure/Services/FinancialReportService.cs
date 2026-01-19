@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Application.Contracts.AI;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Infrastructure.Data;
 
@@ -88,7 +89,7 @@ public class FinancialReportService : IFinancialReportService
         }
     }
 
-    public async Task<string> AskQuestionAsync(Guid reportId, string question)
+    public async Task<QuestionAnswerResult> AskQuestionAsync(Guid reportId, string question)
     {
         var report = await GetReportByIdAsync(reportId);
         if (report == null)
@@ -96,18 +97,17 @@ public class FinancialReportService : IFinancialReportService
             throw new Domain.Exceptions.NotFoundException("FinancialReport", reportId);
         }
 
-            // Use AI service to answer question based on report content
-            var context = $"Financial Report - {report.ReportType} {report.Year}";
-            if (report.Quarter.HasValue)
-            {
-                context += $" Q{report.Quarter}";
-            }
-            context += $"\n\nData:\n{report.Content}";
+        var context = $"Financial Report - {report.ReportType} {report.Year}";
+        if (report.Quarter.HasValue)
+        {
+            context += $" Q{report.Quarter}";
+        }
+        context += $"\n\nData:\n{report.Content}";
 
-            var answer = await _aiService.AnswerQuestionAsync(question, context);
-            
+        var result = await _aiService.AnswerQuestionAsync(question, context);
+        
         _logger.LogInformation("Answered question for report {ReportId}", reportId);
-        return answer;
+        return result;
     }
 }
 

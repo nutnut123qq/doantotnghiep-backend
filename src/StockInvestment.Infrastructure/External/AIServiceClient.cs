@@ -1,10 +1,17 @@
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Application.Contracts.AI;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json.Serialization;
 
 namespace StockInvestment.Infrastructure.External;
 
+/// <summary>
+/// Client for AI service endpoints.
+/// HttpClient BaseAddress is configured as "http://localhost:8000" (without /api)
+/// All endpoints use absolute paths like "/api/qa", "/api/summarize", etc.
+/// </summary>
 public class AIServiceClient : IAIService
 {
     private readonly HttpClient _httpClient;
@@ -22,7 +29,8 @@ public class AIServiceClient : IAIService
         {
             var response = await _httpClient.PostAsJsonAsync("/api/summarize", new { content = newsContent }, cancellationToken);
             response.EnsureSuccessStatusCode();
-            var result = await response.Content.ReadFromJsonAsync<SummarizeResponse>();
+            var result = await response.Content.ReadFromJsonAsync<SummarizeResponse>(
+                cancellationToken: cancellationToken);
             return result?.Summary ?? string.Empty;
         }
         catch (Exception ex)
@@ -40,7 +48,8 @@ public class AIServiceClient : IAIService
                 new { content = newsContent }, cancellationToken);
             response.EnsureSuccessStatusCode();
             
-            var result = await response.Content.ReadFromJsonAsync<SummarizeDetailedResponse>(cancellationToken);
+            var result = await response.Content.ReadFromJsonAsync<SummarizeDetailedResponse>(
+                cancellationToken: cancellationToken);
             
             return new NewsSummaryResult
             {
@@ -63,7 +72,8 @@ public class AIServiceClient : IAIService
         {
             var response = await _httpClient.PostAsJsonAsync("/api/analyze-event", new { description = eventDescription }, cancellationToken);
             response.EnsureSuccessStatusCode();
-            var result = await response.Content.ReadFromJsonAsync<AnalyzeResponse>();
+            var result = await response.Content.ReadFromJsonAsync<AnalyzeResponse>(
+                cancellationToken: cancellationToken);
             return result?.Analysis ?? string.Empty;
         }
         catch (Exception ex)
@@ -81,7 +91,8 @@ public class AIServiceClient : IAIService
                 new { description = eventDescription }, cancellationToken);
             response.EnsureSuccessStatusCode();
             
-            var result = await response.Content.ReadFromJsonAsync<AnalyzeEventDetailedResponse>(cancellationToken);
+            var result = await response.Content.ReadFromJsonAsync<AnalyzeEventDetailedResponse>(
+                cancellationToken: cancellationToken);
             
             return new EventAnalysisResult
             {
@@ -102,7 +113,8 @@ public class AIServiceClient : IAIService
         {
             var response = await _httpClient.PostAsJsonAsync("/api/forecast", new { tickerId }, cancellationToken);
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<object>() ?? new { };
+            return await response.Content.ReadFromJsonAsync<object>(
+                cancellationToken: cancellationToken) ?? new { };
         }
         catch (Exception ex)
         {
@@ -111,14 +123,22 @@ public class AIServiceClient : IAIService
         }
     }
 
-    public async Task<string> AnswerQuestionAsync(string question, string context, CancellationToken cancellationToken = default)
+    public async Task<QuestionAnswerResult> AnswerQuestionAsync(string question, string context, CancellationToken cancellationToken = default)
     {
         try
         {
+            // Note: Endpoint is "/api/qa" because HttpClient BaseAddress is "http://localhost:8000"
             var response = await _httpClient.PostAsJsonAsync("/api/qa", new { question, context }, cancellationToken);
             response.EnsureSuccessStatusCode();
-            var result = await response.Content.ReadFromJsonAsync<QAResponse>();
-            return result?.Answer ?? string.Empty;
+            
+            var result = await response.Content.ReadFromJsonAsync<QADetailedResponse>(
+                cancellationToken: cancellationToken);
+            
+            return new QuestionAnswerResult
+            {
+                Answer = result?.Answer ?? string.Empty,
+                Sources = result?.Sources ?? new List<string>()
+            };
         }
         catch (Exception ex)
         {
@@ -133,7 +153,8 @@ public class AIServiceClient : IAIService
         {
             var response = await _httpClient.PostAsJsonAsync("/api/parse-alert", new { input = naturalLanguageInput }, cancellationToken);
             response.EnsureSuccessStatusCode();
-            var result = await response.Content.ReadFromJsonAsync<ParseAlertApiResponse>();
+            var result = await response.Content.ReadFromJsonAsync<ParseAlertApiResponse>(
+                cancellationToken: cancellationToken);
 
             if (result == null)
             {
@@ -172,7 +193,8 @@ public class AIServiceClient : IAIService
             }
             
             response.EnsureSuccessStatusCode();
-            var result = await response.Content.ReadFromJsonAsync<ForecastApiResponse>();
+            var result = await response.Content.ReadFromJsonAsync<ForecastApiResponse>(
+                cancellationToken: cancellationToken);
 
             return ParseForecastResponse(result);
         }
@@ -212,7 +234,8 @@ public class AIServiceClient : IAIService
             }
             
             response.EnsureSuccessStatusCode();
-            var result = await response.Content.ReadFromJsonAsync<ForecastApiResponse>();
+            var result = await response.Content.ReadFromJsonAsync<ForecastApiResponse>(
+                cancellationToken: cancellationToken);
 
             return ParseForecastResponse(result);
         }
@@ -384,7 +407,19 @@ public class AIServiceClient : IAIService
     );
     private record AnalyzeResponse(string Analysis);
     private record AnalyzeEventDetailedResponse(string Analysis, string Impact);
-    private record QAResponse(string Answer);
+    
+    /// <summary>
+    /// Response from AI service /api/qa endpoint
+    /// Uses JsonPropertyName to ensure proper camelCase mapping from Python FastAPI
+    /// </summary>
+    private sealed class QADetailedResponse
+    {
+        [JsonPropertyName("answer")]
+        public string Answer { get; set; } = string.Empty;
+
+        [JsonPropertyName("sources")]
+        public List<string> Sources { get; set; } = new();
+    }
     private record ParseAlertApiResponse(string Ticker, string Condition, decimal Threshold, string Timeframe, string AlertType);
     private record ForecastApiResponse(
         string Symbol,
@@ -428,7 +463,8 @@ public class AIServiceClient : IAIService
             _logger.LogInformation("Successfully received response from AI service for symbol {Symbol}", symbol);
             
             response.EnsureSuccessStatusCode();
-            var result = await response.Content.ReadFromJsonAsync<InsightApiResponse>();
+            var result = await response.Content.ReadFromJsonAsync<InsightApiResponse>(
+                cancellationToken: cancellationToken);
 
             if (result == null)
             {
@@ -470,6 +506,42 @@ public class AIServiceClient : IAIService
             throw;
         }
     }
+
+    public async Task<string?> GetAlertExplanationAsync(
+        string symbol,
+        string alertType,
+        decimal currentValue,
+        decimal threshold,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var prompt = $@"Stock {symbol} triggered a {alertType} alert.
+Threshold: {threshold:N0}
+Current Value: {currentValue:N0}
+
+Provide a brief 1-2 sentence explanation of what this alert means for investors. Keep it concise and actionable.";
+
+            var response = await _httpClient.PostAsJsonAsync("/api/ai/quick-analysis", new
+            {
+                prompt = prompt,
+                maxTokens = 100
+            }, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            var result = await response.Content.ReadFromJsonAsync<AiAnalysisResponse>(cancellationToken);
+            return result?.Text?.Trim();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get AI explanation for {Symbol} {AlertType}", symbol, alertType);
+            return null;
+        }
+    }
+
+    private record AiAnalysisResponse(string? Text);
 
     private record InsightApiResponse(
         string Symbol,

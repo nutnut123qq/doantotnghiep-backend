@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Api.Contracts.Responses;
 
 namespace StockInvestment.Api.Controllers;
 
@@ -112,6 +113,7 @@ public class FinancialReportController : ControllerBase
     /// Ask a question about a financial report using AI
     /// </summary>
     [HttpPost("{id}/ask")]
+    [ProducesResponseType(typeof(AskQuestionResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> AskQuestion(Guid id, [FromBody] AskQuestionRequest request)
     {
         try
@@ -121,8 +123,16 @@ public class FinancialReportController : ControllerBase
                 return BadRequest("Question is required");
             }
 
-            var answer = await _reportService.AskQuestionAsync(id, request.Question);
-            return Ok(new { question = request.Question, answer });
+            var result = await _reportService.AskQuestionAsync(id, request.Question);
+            
+            var response = new AskQuestionResponse
+            {
+                Question = request.Question,
+                Answer = result.Answer,
+                Sources = result.Sources
+            };
+            
+            return Ok(response);
         }
         catch (Exception ex)
         {

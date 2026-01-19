@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using StockInvestment.Application.Contracts.Notifications;
+using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Enums;
 using StockInvestment.Infrastructure.Hubs;
 using System.Text.Json;
@@ -61,14 +63,25 @@ public class AlertMonitorJob : BackgroundService
             {
                 if (alert.Ticker == null) continue;
 
+                // Anti-spam: Check cooldown period
+                if (alert.TriggeredAt.HasValue &&
+                    DateTime.UtcNow - alert.TriggeredAt.Value < TimeSpan.FromMinutes(5))
+                {
+                    _logger.LogDebug("Alert {AlertId} in cooldown period, skipping", alert.Id);
+                    continue;
+                }
+
                 bool shouldTrigger = false;
+                decimal currentValue = 0;  // Runtime snapshot
 
                 switch (alert.Type)
                 {
                     case AlertType.Price:
+                        currentValue = alert.Ticker.CurrentPrice;  // Snapshot TRƯỚC khi check
                         shouldTrigger = CheckPriceAlert(alert);
                         break;
                     case AlertType.Volume:
+                        currentValue = alert.Ticker.Volume ?? 0;
                         shouldTrigger = CheckVolumeAlert(alert);
                         break;
                     // Add more alert types as needed
@@ -76,7 +89,7 @@ public class AlertMonitorJob : BackgroundService
 
                 if (shouldTrigger)
                 {
-                    await TriggerAlertAsync(alert, unitOfWork, cancellationToken);
+                    await TriggerAlertAsync(alert, currentValue, unitOfWork, cancellationToken);  // Pass snapshot
                 }
             }
         }
@@ -122,45 +135,128 @@ public class AlertMonitorJob : BackgroundService
         return alert.Ticker.Volume.Value > (long)alert.Threshold.Value;
     }
 
-    private async Task TriggerAlertAsync(Domain.Entities.Alert alert, StockInvestment.Application.Interfaces.IUnitOfWork unitOfWork, CancellationToken cancellationToken)
+    private async Task TriggerAlertAsync(
+        Domain.Entities.Alert alert,
+        decimal currentValue,  // Runtime snapshot
+        StockInvestment.Application.Interfaces.IUnitOfWork unitOfWork,
+        CancellationToken cancellationToken)
     {
         _logger.LogInformation("Triggering alert {AlertId} for user {UserId}", alert.Id, alert.UserId);
 
-        alert.TriggeredAt = DateTime.UtcNow;
-        alert.IsActive = false; // Deactivate after triggering
+        // Get operator trực tiếp từ alert condition
+        var operatorStr = GetOperator(alert);
 
+        // Build context
+        var context = new AlertTriggeredContext
+        {
+            Alert = alert,
+            UserId = alert.UserId,
+            CurrentValue = currentValue,
+            TriggeredAt = DateTime.UtcNow,
+            Operator = operatorStr,
+            MatchedCondition = $"{alert.Type} {operatorStr} {alert.Threshold}",
+            AiExplanation = null
+        };
+
+        // Get AI Explanation với timeout
+        try
+        {
+            using var aiCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            aiCts.CancelAfter(TimeSpan.FromSeconds(3));
+
+            using var scope = _serviceProvider.CreateScope();
+            var aiService = scope.ServiceProvider.GetRequiredService<IAIService>();
+
+            var explanation = await aiService.GetAlertExplanationAsync(
+                alert.Ticker?.Symbol ?? "",
+                alert.Type.ToString(),
+                currentValue,
+                alert.Threshold ?? 0,
+                aiCts.Token
+            );
+
+            context.AiExplanation = explanation ?? "AI explanation unavailable";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get AI explanation for alert {AlertId}", alert.Id);
+            context.AiExplanation = "AI explanation unavailable";
+        }
+
+        // Persist TriggeredAt TRƯỚC khi gửi notifications (anti-spam)
+        alert.TriggeredAt = context.TriggeredAt;
+        alert.IsActive = false;
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // Send SignalR notification to user
+        // Send SignalR notification
         try
         {
             using var scope = _serviceProvider.CreateScope();
             var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<TradingHub>>();
-            
+
+            // camelCase payload cho frontend
             var notification = new
             {
-                AlertId = alert.Id,
-                Symbol = alert.Ticker?.Symbol ?? "Unknown",
-                TickerName = alert.Ticker?.Name ?? "Unknown",
-                Type = alert.Type.ToString(),
-                Threshold = alert.Threshold,
-                CurrentPrice = alert.Ticker?.CurrentPrice ?? 0,
-                TriggeredAt = alert.TriggeredAt
+                alertId = alert.Id,
+                symbol = alert.Ticker?.Symbol ?? "Unknown",
+                tickerName = alert.Ticker?.Name ?? "Unknown",
+                type = alert.Type.ToString(),
+                threshold = alert.Threshold,
+                currentValue = context.CurrentValue,
+                triggeredAt = alert.TriggeredAt,
+                aiExplanation = context.AiExplanation
             };
 
-            // Send to specific user's connection group
-            await hubContext.Clients.User(alert.UserId.ToString()).SendAsync("AlertTriggered", notification, cancellationToken);
-            
-            _logger.LogInformation("SignalR notification sent for alert {AlertId} to user {UserId}", alert.Id, alert.UserId);
+            // Event name: "AlertTriggered"
+            await hubContext.Clients.User(alert.UserId.ToString())
+                .SendAsync("AlertTriggered", notification, cancellationToken);
+
+            _logger.LogInformation("SignalR notification sent for alert {AlertId}", alert.Id);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send SignalR notification for alert {AlertId}", alert.Id);
-            // Don't fail the alert trigger if notification fails
         }
 
-        _logger.LogInformation("Alert {AlertId} triggered: {Symbol} {Type} {Threshold}",
-            alert.Id, alert.Ticker?.Symbol, alert.Type, alert.Threshold);
+        // Send external notifications (Slack/Telegram)
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var notificationService = scope.ServiceProvider.GetRequiredService<INotificationChannelService>();
+
+            await notificationService.SendAlertNotificationAsync(context, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send external notifications for alert {AlertId}", alert.Id);
+            // Don't fail the alert trigger
+        }
+
+        _logger.LogInformation("Alert {AlertId} triggered successfully", alert.Id);
+    }
+
+    private string GetOperator(Domain.Entities.Alert alert)
+    {
+        try
+        {
+            var condition = JsonSerializer.Deserialize<AlertCondition>(alert.Condition);
+            if (condition?.Operator == null)
+                return ">";
+
+            // Check >= and <= BEFORE > and <
+            var op = condition.Operator.ToLower();
+            if (op.Contains(">=")) return ">=";
+            if (op.Contains("<=")) return "<=";
+            if (op.Contains(">") || op == "above" || op == "greater") return ">";
+            if (op.Contains("<") || op == "below" || op == "less") return "<";
+            if (op == "=" || op == "equals") return "=";
+
+            return ">";
+        }
+        catch
+        {
+            return ">";
+        }
     }
 }
 

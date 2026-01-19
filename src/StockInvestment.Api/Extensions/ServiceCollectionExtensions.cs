@@ -214,6 +214,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPortfolioService, PortfolioService>();
         services.AddScoped<IEmailService, EmailService>();
         services.AddScoped<IWorkspaceService, WorkspaceService>();
+        services.AddScoped<INotificationChannelService, NotificationChannelService>();
 
         return services;
     }
@@ -290,6 +291,41 @@ public static class ServiceCollectionExtensions
                 exceptionsAllowedBeforeBreaking: 3,
                 durationOfBreak: TimeSpan.FromSeconds(15));
         });
+
+        // Configure NotificationChannel Options
+        services.Configure<Infrastructure.Configuration.NotificationChannelOptions>(
+            configuration.GetSection("NotificationChannels"));
+
+        // Configure HTTP Clients for Notification Channels with Polly retry
+        var retryPolicy = HttpPolicyExtensions
+            .HandleTransientHttpError()
+            .WaitAndRetryAsync(2, retryAttempt => TimeSpan.FromSeconds(1));
+
+        services.AddHttpClient("Slack")
+            .AddPolicyHandler(retryPolicy)
+            .ConfigureHttpClient(client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(5);
+            });
+
+        services.AddHttpClient("Telegram")
+            .AddPolicyHandler(retryPolicy)
+            .ConfigureHttpClient(client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(5);
+            });
+
+        // Register notification channel senders
+        services.AddTransient<INotificationChannelSender>(sp =>
+            new Infrastructure.Services.NotificationChannels.SlackNotificationSender(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("Slack"),
+                sp.GetRequiredService<ILogger<Infrastructure.Services.NotificationChannels.SlackNotificationSender>>()));
+
+        services.AddTransient<INotificationChannelSender>(sp =>
+            new Infrastructure.Services.NotificationChannels.TelegramNotificationSender(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("Telegram"),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Infrastructure.Configuration.NotificationChannelOptions>>(),
+                sp.GetRequiredService<ILogger<Infrastructure.Services.NotificationChannels.TelegramNotificationSender>>()));
 
         return services;
     }

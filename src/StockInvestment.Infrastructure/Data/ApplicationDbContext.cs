@@ -35,6 +35,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<WorkspaceMessage> WorkspaceMessages { get; set; } = null!;
     public DbSet<WorkspaceWatchlist> WorkspaceWatchlists { get; set; } = null!;
     public DbSet<WorkspaceLayout> WorkspaceLayouts { get; set; } = null!;
+    public DbSet<NotificationChannelConfig> NotificationChannelConfigs { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -261,6 +262,24 @@ public class ApplicationDbContext : DbContext
 
         modelBuilder.Entity<EmailVerificationToken>()
             .HasIndex(t => t.ExpiresAt);
+
+        // Configure NotificationChannelConfig
+        modelBuilder.Entity<NotificationChannelConfig>()
+            .ToTable("NotificationChannelConfigs");
+
+        modelBuilder.Entity<NotificationChannelConfig>()
+            .HasOne(c => c.User)
+            .WithMany()
+            .HasForeignKey(c => c.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<NotificationChannelConfig>()
+            .HasIndex(c => c.UserId)
+            .IsUnique();
+
+        modelBuilder.Entity<NotificationChannelConfig>()
+            .Property(c => c.RowVersion)
+            .IsRowVersion();
     }
 }
 

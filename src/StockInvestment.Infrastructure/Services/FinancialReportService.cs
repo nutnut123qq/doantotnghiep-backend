@@ -2,8 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.Contracts.AI;
+using StockInvestment.Application.DTOs.AnalysisReports;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Infrastructure.Data;
+using System.Text.Json;
 
 namespace StockInvestment.Infrastructure.Services;
 
@@ -46,6 +48,48 @@ public class FinancialReportService : IFinancialReportService
         }
 
         return await GetReportsByTickerAsync(ticker.Id);
+    }
+
+    public async Task<FinancialSnapshotDto?> GetLatestFinancialSnapshotAsync(string symbol)
+    {
+        var normalizedSymbol = symbol.ToUpperInvariant();
+        var ticker = await _context.StockTickers
+            .FirstOrDefaultAsync(t => t.Symbol == normalizedSymbol);
+
+        if (ticker == null)
+        {
+            _logger.LogWarning("No ticker found for symbol {Symbol}", normalizedSymbol);
+            return null;
+        }
+
+        var latestReport = await _context.FinancialReports
+            .Where(r => r.TickerId == ticker.Id)
+            .OrderByDescending(r => r.ReportDate)
+            .ThenByDescending(r => r.Year)
+            .ThenByDescending(r => r.Quarter ?? 0)
+            .FirstOrDefaultAsync();
+
+        if (latestReport == null)
+        {
+            _logger.LogInformation("No financial report found for symbol {Symbol}", normalizedSymbol);
+            return null;
+        }
+
+        var snapshot = new FinancialSnapshotDto
+        {
+            Symbol = normalizedSymbol,
+            Period = BuildPeriodLabel(latestReport),
+            ReportDate = latestReport.ReportDate,
+            RawText = latestReport.Content
+        };
+
+        if (TryParseSnapshot(latestReport.Content, snapshot))
+        {
+            return snapshot;
+        }
+
+        snapshot.Notes = Cap(latestReport.Content, 1200);
+        return snapshot;
     }
 
     public async Task<FinancialReport?> GetReportByIdAsync(Guid id)
@@ -108,6 +152,91 @@ public class FinancialReportService : IFinancialReportService
         
         _logger.LogInformation("Answered question for report {ReportId}", reportId);
         return result;
+    }
+
+    private static string BuildPeriodLabel(FinancialReport report)
+    {
+        if (report.Quarter.HasValue)
+        {
+            return $"Q{report.Quarter} {report.Year}";
+        }
+
+        return $"{report.Year} ({report.ReportType})";
+    }
+
+    private static bool TryParseSnapshot(string content, FinancialSnapshotDto snapshot)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(content);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            snapshot.Revenue = TryGetDecimal(doc.RootElement, "Revenue");
+            snapshot.NetProfit = TryGetDecimal(doc.RootElement, "NetProfit");
+            snapshot.Eps = TryGetDecimal(doc.RootElement, "EPS", "Eps");
+            snapshot.Pe = TryGetDecimal(doc.RootElement, "PE", "P/E", "Pe");
+            snapshot.Roe = TryGetDecimal(doc.RootElement, "ROE", "Roe");
+            snapshot.DebtToEquity = TryGetDecimal(doc.RootElement, "DebtToEquity", "Debt/Equity", "DebtEquity");
+
+            return snapshot.Revenue.HasValue ||
+                   snapshot.NetProfit.HasValue ||
+                   snapshot.Eps.HasValue ||
+                   snapshot.Pe.HasValue ||
+                   snapshot.Roe.HasValue ||
+                   snapshot.DebtToEquity.HasValue;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static decimal? TryGetDecimal(JsonElement root, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (root.TryGetProperty(key, out var element))
+            {
+                if (element.ValueKind == JsonValueKind.Number && element.TryGetDecimal(out var number))
+                {
+                    return number;
+                }
+
+                if (element.ValueKind == JsonValueKind.String)
+                {
+                    var text = element.GetString();
+                    if (decimal.TryParse(text, out var parsed))
+                    {
+                        return parsed;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string Cap(string? text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+
+        if (text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        return text[..maxLength] + "…";
     }
 }
 

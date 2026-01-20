@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using StockInvestment.Application.DTOs.AnalysisReports;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Infrastructure.Data;
@@ -43,6 +44,35 @@ public class NewsService : INewsService
     public async Task<News?> GetNewsByIdAsync(Guid id)
     {
         return await _unitOfWork.Repository<News>().GetByIdAsync(id);
+    }
+
+    public async Task<IReadOnlyList<NewsItemDto>> GetRecentNewsForSymbolAsync(string symbol, int days = 7, int limit = 5)
+    {
+        var normalizedSymbol = symbol.ToUpperInvariant();
+        var ticker = await _context.StockTickers
+            .FirstOrDefaultAsync(t => t.Symbol == normalizedSymbol);
+
+        if (ticker == null)
+        {
+            _logger.LogWarning("No ticker found for symbol {Symbol} when querying news", normalizedSymbol);
+            return Array.Empty<NewsItemDto>();
+        }
+
+        var sinceDate = DateTime.UtcNow.AddDays(-days);
+        var newsList = await _context.News
+            .Where(n => n.TickerId == ticker.Id && n.PublishedAt >= sinceDate)
+            .OrderByDescending(n => n.PublishedAt)
+            .Take(limit)
+            .ToListAsync();
+
+        return newsList.Select(n => new NewsItemDto
+        {
+            Id = n.Id,
+            Title = n.Title,
+            PublishedAt = n.PublishedAt,
+            Url = n.Url,
+            Summary = n.Summary
+        }).ToList();
     }
 
     public Task RequestSummarizationAsync(Guid newsId)

@@ -80,6 +80,7 @@ public class FinancialReportService : IFinancialReportService
             Symbol = normalizedSymbol,
             Period = BuildPeriodLabel(latestReport),
             ReportDate = latestReport.ReportDate,
+            SourceUrl = "internal://financial-report",
             RawText = latestReport.Content
         };
 

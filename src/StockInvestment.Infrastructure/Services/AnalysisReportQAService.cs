@@ -10,7 +10,7 @@ namespace StockInvestment.Infrastructure.Services;
 
 /// <summary>
 /// Service for Q&A functionality on Analysis Reports
-/// V1 Minimal: NO RAG, builds context from DB directly
+/// Uses RAG with multi-source context (report + financial + news) and optional ingest
 /// </summary>
 public class AnalysisReportQAService : IAnalysisReportQAService
 {

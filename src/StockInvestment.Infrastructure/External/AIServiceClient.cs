@@ -4,6 +4,7 @@ using StockInvestment.Application.Contracts.AI;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace StockInvestment.Infrastructure.External;
 
@@ -421,18 +422,38 @@ public class AIServiceClient : IAIService
         public List<string> Sources { get; set; } = new();
     }
     private record ParseAlertApiResponse(string Ticker, string Condition, decimal Threshold, string Timeframe, string AlertType);
-    private record ForecastApiResponse(
-        string Symbol,
-        string Trend,
-        string Confidence,
-        double ConfidenceScore,
-        string TimeHorizon,
-        string Recommendation,
-        List<string> KeyDrivers,
-        List<string> Risks,
-        string Analysis,
-        string GeneratedAt
-    );
+    private sealed class ForecastApiResponse
+    {
+        [JsonPropertyName("symbol")]
+        public string Symbol { get; set; } = string.Empty;
+
+        [JsonPropertyName("trend")]
+        public string Trend { get; set; } = string.Empty;
+
+        [JsonPropertyName("confidence")]
+        public string Confidence { get; set; } = string.Empty;
+
+        [JsonPropertyName("confidence_score")]
+        public double ConfidenceScore { get; set; }
+
+        [JsonPropertyName("time_horizon")]
+        public string TimeHorizon { get; set; } = string.Empty;
+
+        [JsonPropertyName("recommendation")]
+        public string Recommendation { get; set; } = string.Empty;
+
+        [JsonPropertyName("key_drivers")]
+        public List<string> KeyDrivers { get; set; } = new();
+
+        [JsonPropertyName("risks")]
+        public List<string> Risks { get; set; } = new();
+
+        [JsonPropertyName("analysis")]
+        public string Analysis { get; set; } = string.Empty;
+
+        [JsonPropertyName("generated_at")]
+        public string GeneratedAt { get; set; } = string.Empty;
+    }
 
     public async Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default)
     {
@@ -516,29 +537,85 @@ public class AIServiceClient : IAIService
     {
         try
         {
-            var prompt = $@"Stock {symbol} triggered a {alertType} alert.
-Threshold: {threshold:N0}
-Current Value: {currentValue:N0}
+            // Reuse existing AI forecast call (gọi trực tiếp Python AI service)
+            var forecast = await GenerateForecastBySymbolAsync(symbol, "short", cancellationToken);
+            if (forecast == null) return null;
 
-Provide a brief 1-2 sentence explanation of what this alert means for investors. Keep it concise and actionable.";
+            // Extract 2 drivers đầu tiên (keep it short)
+            var drivers = (forecast.KeyDrivers ?? new List<string>())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Take(2)
+                .ToList();
 
-            var response = await _httpClient.PostAsJsonAsync("/api/ai/quick-analysis", new
+            var confidence = string.IsNullOrWhiteSpace(forecast.Confidence)
+                ? "N/A"
+                : forecast.Confidence.Trim();
+
+            var recommendation = string.IsNullOrWhiteSpace(forecast.Recommendation)
+                ? "N/A"
+                : forecast.Recommendation.Trim();
+
+            var trend = string.IsNullOrWhiteSpace(forecast.Trend)
+                ? "Sideways"
+                : forecast.Trend.Trim();
+
+            // Map recommendation/trend to sentiment (proxy)
+            string sentiment = MapToSentiment(recommendation, trend);
+
+            // Build explanation text (drivers + confidence + sentiment + recommendation)
+            string text;
+            if (drivers.Count > 0)
             {
-                prompt = prompt,
-                maxTokens = 100
-            }, cancellationToken);
+                text = $"Lý do: {string.Join(", ", drivers)}. Độ tin cậy: {confidence}. Sentiment: {sentiment}. Khuyến nghị: {recommendation}.";
+            }
+            else
+            {
+                text = $"Phân tích kỹ thuật cho thấy: {recommendation}. Độ tin cậy: {confidence}. Sentiment: {sentiment}.";
+            }
 
-            if (!response.IsSuccessStatusCode)
-                return null;
+            // Normalize whitespace for cleaner display on Slack/Telegram
+            text = Regex.Replace(text, @"\s+", " ").Trim();
 
-            var result = await response.Content.ReadFromJsonAsync<AiAnalysisResponse>(cancellationToken);
-            return result?.Text?.Trim();
+            // Limit length for Slack/Telegram (max 240 chars)
+            const int maxLen = 240;
+            if (text.Length > maxLen) text = text.Substring(0, maxLen - 1) + "…";
+
+            return text;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to get AI explanation for {Symbol} {AlertType}", symbol, alertType);
-            return null;
+            _logger.LogWarning(ex, "Failed to build alert AI explanation for {Symbol}", symbol);
+            return null; // caller will set "AI explanation unavailable"
         }
+    }
+
+    /// <summary>
+    /// Map recommendation/trend to sentiment label
+    /// Supports various aliases: Buy/Strong Buy/Accumulate → Bullish, Sell/Reduce → Bearish
+    /// </summary>
+    private string MapToSentiment(string recommendation, string trend)
+    {
+        // Priority: recommendation > trend
+        // Use ToLowerInvariant() để tránh culture-specific issues
+        var rec = (recommendation ?? "").Trim().ToLowerInvariant();
+        
+        // Bullish indicators: Contains("buy") match: "Buy", "BUY", "Strong Buy", "strong_buy", etc.
+        if (rec.Contains("buy") || rec.Contains("accumulate")) return "Bullish";
+        
+        // Bearish indicators
+        if (rec.Contains("sell") || rec.Contains("reduce")) return "Bearish";
+        
+        // Neutral indicators
+        if (rec.Contains("hold") || rec.Contains("neutral")) return "Neutral";
+        
+        // Fallback to trend if recommendation doesn't match
+        var tr = (trend ?? "").Trim().ToLowerInvariant();
+        if (tr.Contains("up")) return "Bullish";
+        if (tr.Contains("down")) return "Bearish";
+        if (tr.Contains("sideways")) return "Neutral";
+        
+        // Final fallback cho edge cases (empty, "N/A", unexpected values)
+        return "Neutral";
     }
 
     private record AiAnalysisResponse(string? Text);

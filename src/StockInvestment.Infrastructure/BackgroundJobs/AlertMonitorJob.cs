@@ -154,8 +154,8 @@ public class AlertMonitorJob : BackgroundService
             CurrentValue = currentValue,
             TriggeredAt = DateTime.UtcNow,
             Operator = operatorStr,
-            MatchedCondition = $"{alert.Type} {operatorStr} {alert.Threshold}",
-            AiExplanation = null
+            MatchedCondition = $"{alert.Type} {operatorStr} {alert.Threshold}"
+            // AiExplanation has default value "AI explanation unavailable", will be overwritten below
         };
 
         // Get AI Explanation với timeout

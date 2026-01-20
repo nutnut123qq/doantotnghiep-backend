@@ -1,4 +1,5 @@
 using StockInvestment.Application.Contracts.AI;
+using System.Text.Json.Serialization;
 
 namespace StockInvestment.Application.Interfaces;
 
@@ -30,13 +31,25 @@ public class ForecastResult
 {
     public string Symbol { get; set; } = string.Empty;
     public string Trend { get; set; } = string.Empty; // Up, Down, Sideways
+    
+    [JsonPropertyName("confidence")]
     public string Confidence { get; set; } = string.Empty; // High, Medium, Low
+    
+    [JsonPropertyName("confidence_score")]
     public double ConfidenceScore { get; set; }
+    
+    [JsonPropertyName("time_horizon")]
     public string TimeHorizon { get; set; } = string.Empty;
+    
     public string Recommendation { get; set; } = string.Empty; // Buy, Hold, Sell
+    
+    [JsonPropertyName("key_drivers")]
     public List<string> KeyDrivers { get; set; } = new();
+    
     public List<string> Risks { get; set; } = new();
     public string Analysis { get; set; } = string.Empty;
+    
+    [JsonPropertyName("generated_at")]
     public DateTime GeneratedAt { get; set; }
 }
 

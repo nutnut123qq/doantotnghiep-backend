@@ -13,5 +13,5 @@ public class AlertTriggeredContext
     public string Operator { get; set; } = null!;  // ">", "<", ">=", "<=", "="
     public string MatchedCondition { get; set; } = null!;  // "Price > 100,000" (for logging/display)
     
-    public string? AiExplanation { get; set; }  // Nullable nếu AI fails
+    public string AiExplanation { get; set; } = "AI explanation unavailable";  // Non-nullable with default fallback
 }

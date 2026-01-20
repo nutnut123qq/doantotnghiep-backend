@@ -148,6 +148,15 @@ public class NotificationChannelService : INotificationChannelService
             return;
         }
 
+        // Defensive check: AiExplanation should be set by AlertMonitorJob
+        var aiExplanation = context.AiExplanation;
+        if (string.IsNullOrWhiteSpace(aiExplanation))
+        {
+            _logger.LogWarning("AiExplanation is empty/null for alert {AlertId}. Expected to be set by AlertMonitorJob.", 
+                context.Alert?.Id ?? Guid.Empty);
+            aiExplanation = "AI explanation unavailable"; // Defensive fallback
+        }
+
         // Build variables
         var variables = new Dictionary<string, string>
         {
@@ -157,7 +166,7 @@ public class NotificationChannelService : INotificationChannelService
             { "Threshold", context.Alert.Threshold?.ToString("N0") ?? "0" },
             { "CurrentValue", context.CurrentValue.ToString("N0") },
             { "Time", context.TriggeredAt.ToString("yyyy-MM-dd HH:mm:ss") },
-            { "AiExplanation", context.AiExplanation ?? "AI explanation unavailable" }
+            { "AiExplanation", aiExplanation }  // Guaranteed non-null and non-empty
         };
 
         var message = await _templateService.RenderTemplateAsync(template.Id, variables, cancellationToken);

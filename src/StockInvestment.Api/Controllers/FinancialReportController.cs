@@ -125,11 +125,17 @@ public class FinancialReportController : ControllerBase
 
             var result = await _reportService.AskQuestionAsync(id, request.Question);
             
+            // Map SourceObject to string (sourceUrl or title)
+            var sources = result.Sources
+                .Select(s => !string.IsNullOrEmpty(s.SourceUrl) ? s.SourceUrl : s.Title)
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToList();
+            
             var response = new AskQuestionResponse
             {
                 Question = request.Question,
                 Answer = result.Answer,
-                Sources = result.Sources
+                Sources = sources
             };
             
             return Ok(response);

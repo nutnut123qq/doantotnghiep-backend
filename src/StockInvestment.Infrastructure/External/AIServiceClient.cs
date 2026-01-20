@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.Contracts.AI;
+using StockInvestment.Application.DTOs.AnalysisReports;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
@@ -124,21 +125,38 @@ public class AIServiceClient : IAIService
         }
     }
 
-    public async Task<QuestionAnswerResult> AnswerQuestionAsync(string question, string context, CancellationToken cancellationToken = default)
+    public async Task<QuestionAnswerResult> AnswerQuestionAsync(
+        string question,
+        string baseContext,
+        string? documentId = null,
+        string? source = null,
+        string? symbol = null,
+        int topK = 6,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            // Note: Endpoint is "/api/qa" because HttpClient BaseAddress is "http://localhost:8000"
-            var response = await _httpClient.PostAsJsonAsync("/api/qa", new { question, context }, cancellationToken);
+            // Call RAG-enabled /api/qa with filters (snake_case)
+            var requestBody = new
+            {
+                question,
+                base_context = baseContext,
+                top_k = topK,
+                document_id = documentId,
+                source,
+                symbol
+            };
+            
+            var response = await _httpClient.PostAsJsonAsync("/api/qa", requestBody, cancellationToken);
             response.EnsureSuccessStatusCode();
             
-            var result = await response.Content.ReadFromJsonAsync<QADetailedResponse>(
+            var result = await response.Content.ReadFromJsonAsync<QAWithSourcesResponse>(
                 cancellationToken: cancellationToken);
             
             return new QuestionAnswerResult
             {
                 Answer = result?.Answer ?? string.Empty,
-                Sources = result?.Sources ?? new List<string>()
+                Sources = result?.Sources ?? new List<SourceObject>()
             };
         }
         catch (Exception ex)
@@ -410,16 +428,15 @@ public class AIServiceClient : IAIService
     private record AnalyzeEventDetailedResponse(string Analysis, string Impact);
     
     /// <summary>
-    /// Response from AI service /api/qa endpoint
-    /// Uses JsonPropertyName to ensure proper camelCase mapping from Python FastAPI
+    /// Response from AI service /api/qa endpoint with source objects
     /// </summary>
-    private sealed class QADetailedResponse
+    private sealed class QAWithSourcesResponse
     {
         [JsonPropertyName("answer")]
         public string Answer { get; set; } = string.Empty;
 
         [JsonPropertyName("sources")]
-        public List<string> Sources { get; set; } = new();
+        public List<SourceObject> Sources { get; set; } = new();
     }
     private record ParseAlertApiResponse(string Ticker, string Condition, decimal Threshold, string Timeframe, string AlertType);
     private sealed class ForecastApiResponse
@@ -616,6 +633,165 @@ public class AIServiceClient : IAIService
         
         // Final fallback cho edge cases (empty, "N/A", unexpected values)
         return "Neutral";
+    }
+
+    public async Task<IngestResult> IngestDocumentAsync(
+        string documentId,
+        string source,
+        string text,
+        object metadata,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            EnsureBaseAddressConfigured();
+
+            var endpoint = "/api/rag/ingest";
+            
+            // Get internal API key from configuration
+            var apiKey = Environment.GetEnvironmentVariable("AI_SERVICE_INTERNAL_API_KEY");
+            if (string.IsNullOrEmpty(apiKey))
+            {
+                _logger.LogWarning("AI_SERVICE_INTERNAL_API_KEY not configured, ingest may fail");
+            }
+            
+            // Build request (snake_case)
+            var requestBody = new
+            {
+                document_id = documentId,
+                source,
+                text,
+                metadata
+            };
+            
+            // Create request message with header
+            var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = JsonContent.Create(requestBody)
+            };
+            
+            if (!string.IsNullOrEmpty(apiKey))
+            {
+                request.Headers.Add("X-Internal-Api-Key", apiKey);
+            }
+            
+            var response = await _httpClient.SendAsync(request, cancellationToken);
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError(
+                    "AI service ingest failed ({StatusCode}): {Error}",
+                    response.StatusCode, errorContent);
+                response.EnsureSuccessStatusCode();
+            }
+            
+            var result = await response.Content.ReadFromJsonAsync<IngestResult>(
+                cancellationToken: cancellationToken);
+            
+            if (result == null)
+            {
+                throw new Domain.Exceptions.ExternalServiceException("AI Service",
+                    "Failed to ingest document - response was null");
+            }
+            
+            _logger.LogInformation(
+                "Successfully ingested document {DocumentId}: {ChunksUpserted} chunks",
+                documentId, result.ChunksUpserted);
+            
+            return result;
+        }
+        catch (TaskCanceledException timeoutEx)
+        {
+            _logger.LogError(timeoutEx,
+                "Timeout calling AI service for ingest (documentId: {DocumentId})",
+                documentId);
+            throw new HttpRequestException(
+                $"AI service timeout. Please check if AI service is running at {_httpClient.BaseAddress}",
+                timeoutEx)
+            {
+                Data = { ["StatusCode"] = 408 }
+            };
+        }
+        catch (HttpRequestException httpEx)
+        {
+            _logger.LogError(httpEx, "HTTP error calling AI service for ingest (documentId: {DocumentId})",
+                documentId);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calling AI service for ingest (documentId: {DocumentId})",
+                documentId);
+            throw;
+        }
+    }
+
+    public async Task<AnswerWithContextResult> AnswerWithContextPartsAsync(
+        string question,
+        List<ContextPart> contextParts,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            EnsureBaseAddressConfigured();
+
+            var endpoint = "/api/ai/answer-with-context";
+            
+            _logger.LogInformation("Calling AI service {Endpoint} with {ContextCount} context parts",
+                endpoint, contextParts.Count);
+
+            // Note: snake_case is handled by [JsonPropertyName] in ContextPart/AnswerWithContextResponse DTOs (P0 Fix #1)
+            var response = await _httpClient.PostAsJsonAsync(
+                endpoint,
+                new { question, context_parts = contextParts },
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                await HandleHttpErrorAsync(response, endpoint);
+            }
+
+            response.EnsureSuccessStatusCode();
+            var result = await response.Content.ReadFromJsonAsync<AnswerWithContextResponse>(
+                cancellationToken: cancellationToken);
+
+            if (result == null)
+            {
+                throw new Domain.Exceptions.ExternalServiceException("AI Service",
+                    "Failed to get answer from AI service - response was null");
+            }
+
+            _logger.LogInformation("Successfully received answer with {UsedSourcesCount} sources",
+                result.UsedSources.Count);
+
+            return new AnswerWithContextResult
+            {
+                Answer = result.Answer,
+                UsedSources = result.UsedSources
+            };
+        }
+        catch (TaskCanceledException timeoutEx)
+        {
+            _logger.LogError(timeoutEx,
+                "Timeout calling AI service for Q&A. AI service may be slow or not responding.");
+            throw new HttpRequestException(
+                $"AI service timeout after {_httpClient.Timeout.TotalSeconds} seconds. Please check if AI service is running at {_httpClient.BaseAddress}",
+                timeoutEx)
+            {
+                Data = { ["StatusCode"] = 408 } // Request Timeout
+            };
+        }
+        catch (HttpRequestException httpEx)
+        {
+            _logger.LogError(httpEx, "HTTP error calling AI service for Q&A");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calling AI service for Q&A");
+            throw;
+        }
     }
 
     private record AiAnalysisResponse(string? Text);

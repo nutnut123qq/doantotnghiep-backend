@@ -29,13 +29,17 @@ public class ApplicationDbContext : DbContext
     public DbSet<AIInsight> AIInsights { get; set; } = null!;
     public DbSet<Portfolio> Portfolios { get; set; } = null!;
     public DbSet<EmailVerificationToken> EmailVerificationTokens { get; set; } = null!;
+    public DbSet<PasswordResetToken> PasswordResetTokens { get; set; } = null!;
     public DbSet<ChartSettings> ChartSettings { get; set; } = null!;
     public DbSet<Workspace> Workspaces { get; set; } = null!;
     public DbSet<WorkspaceMember> WorkspaceMembers { get; set; } = null!;
     public DbSet<WorkspaceMessage> WorkspaceMessages { get; set; } = null!;
     public DbSet<WorkspaceWatchlist> WorkspaceWatchlists { get; set; } = null!;
     public DbSet<WorkspaceLayout> WorkspaceLayouts { get; set; } = null!;
+    public DbSet<SharedLayout> SharedLayouts { get; set; } = null!;
     public DbSet<NotificationChannelConfig> NotificationChannelConfigs { get; set; } = null!;
+    public DbSet<AnalysisReport> AnalysisReports { get; set; } = null!;
+    public DbSet<AdminAuditLog> AdminAuditLogs { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -194,12 +198,34 @@ public class ApplicationDbContext : DbContext
             .HasIndex(wl => new { wl.WorkspaceId, wl.LayoutId })
             .IsUnique();
 
+        // Configure SharedLayout
+        modelBuilder.Entity<SharedLayout>()
+            .Property(sl => sl.LayoutJson)
+            .HasColumnType("text");
+
+        modelBuilder.Entity<SharedLayout>()
+            .HasIndex(sl => sl.Code)
+            .IsUnique();
+
+        modelBuilder.Entity<SharedLayout>()
+            .HasIndex(sl => sl.OwnerId);
+
+        modelBuilder.Entity<SharedLayout>()
+            .HasIndex(sl => sl.ExpiresAt);
+
+        modelBuilder.Entity<SharedLayout>()
+            .HasOne(sl => sl.Owner)
+            .WithMany()
+            .HasForeignKey(sl => sl.OwnerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         // Configure table names
         modelBuilder.Entity<Workspace>().ToTable("Workspaces");
         modelBuilder.Entity<WorkspaceMember>().ToTable("WorkspaceMembers");
         modelBuilder.Entity<WorkspaceMessage>().ToTable("WorkspaceMessages");
         modelBuilder.Entity<WorkspaceWatchlist>().ToTable("WorkspaceWatchlists");
         modelBuilder.Entity<WorkspaceLayout>().ToTable("WorkspaceLayouts");
+        modelBuilder.Entity<SharedLayout>().ToTable("SharedLayouts");
 
         // Configure CorporateEvent inheritance (TPH - Table Per Hierarchy)
         modelBuilder.Entity<CorporateEvent>()
@@ -263,6 +289,26 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<EmailVerificationToken>()
             .HasIndex(t => t.ExpiresAt);
 
+        // Configure PasswordResetToken
+        modelBuilder.Entity<PasswordResetToken>()
+            .ToTable("PasswordResetTokens");
+
+        modelBuilder.Entity<PasswordResetToken>()
+            .HasOne(t => t.User)
+            .WithMany()
+            .HasForeignKey(t => t.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<PasswordResetToken>()
+            .HasIndex(t => t.Token)
+            .IsUnique();
+
+        modelBuilder.Entity<PasswordResetToken>()
+            .HasIndex(t => t.UserId);
+
+        modelBuilder.Entity<PasswordResetToken>()
+            .HasIndex(t => t.ExpiresAt);
+
         // Configure NotificationChannelConfig
         modelBuilder.Entity<NotificationChannelConfig>()
             .ToTable("NotificationChannelConfigs");
@@ -280,6 +326,42 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<NotificationChannelConfig>()
             .Property(c => c.RowVersion)
             .IsRowVersion();
+
+        // Configure AnalysisReport table and indexes
+        modelBuilder.Entity<AnalysisReport>()
+            .ToTable("AnalysisReports");
+
+        // Content column as TEXT (unlimited length)
+        modelBuilder.Entity<AnalysisReport>()
+            .Property(ar => ar.Content)
+            .HasColumnType("text");
+
+        // Index on Symbol for filtering
+        modelBuilder.Entity<AnalysisReport>()
+            .HasIndex(ar => ar.Symbol);
+
+        // Index on PublishedAt for sorting
+        modelBuilder.Entity<AnalysisReport>()
+            .HasIndex(ar => ar.PublishedAt);
+
+        // Composite index on Symbol + PublishedAt (descending) for list queries
+        modelBuilder.Entity<AnalysisReport>()
+            .HasIndex(ar => new { ar.Symbol, ar.PublishedAt })
+            .IsDescending(false, true); // Symbol ascending, PublishedAt descending
+
+        // Configure AdminAuditLog
+        modelBuilder.Entity<AdminAuditLog>()
+            .ToTable("AdminAuditLogs");
+
+        modelBuilder.Entity<AdminAuditLog>()
+            .HasIndex(a => a.AdminUserId);
+
+        modelBuilder.Entity<AdminAuditLog>()
+            .HasIndex(a => a.TargetUserId);
+
+        modelBuilder.Entity<AdminAuditLog>()
+            .HasIndex(a => a.CreatedAt);
     }
 }
+
 

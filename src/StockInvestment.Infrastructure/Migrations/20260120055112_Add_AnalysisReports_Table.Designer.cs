@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StockInvestment.Infrastructure.Data;
@@ -11,9 +12,11 @@ using StockInvestment.Infrastructure.Data;
 namespace StockInvestment.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260120055112_Add_AnalysisReports_Table")]
+    partial class Add_AnalysisReports_Table
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -156,45 +159,6 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("AIModelPerformances", (string)null);
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.AdminAuditLog", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("AdminUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("text");
-
-                    b.Property<bool>("IsSuccess")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Payload")
-                        .HasColumnType("text");
-
-                    b.Property<Guid?>("TargetUserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AdminUserId");
-
-                    b.HasIndex("CreatedAt");
-
-                    b.HasIndex("TargetUserId");
-
-                    b.ToTable("AdminAuditLogs", (string)null);
                 });
 
             modelBuilder.Entity("StockInvestment.Domain.Entities.Alert", b =>
@@ -713,43 +677,6 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.ToTable("NotificationTemplates", (string)null);
                 });
 
-            modelBuilder.Entity("StockInvestment.Domain.Entities.PasswordResetToken", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsUsed")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Token")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("UsedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.HasIndex("Token")
-                        .IsUnique();
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("PasswordResetTokens", (string)null);
-                });
-
             modelBuilder.Entity("StockInvestment.Domain.Entities.Portfolio", b =>
                 {
                     b.Property<Guid>("Id")
@@ -833,44 +760,6 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("PushNotificationConfigs", (string)null);
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.SharedLayout", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsPublic")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("LayoutJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("OwnerId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique();
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.HasIndex("OwnerId");
-
-                    b.ToTable("SharedLayouts", (string)null);
                 });
 
             modelBuilder.Entity("StockInvestment.Domain.Entities.StockTicker", b =>
@@ -966,20 +855,11 @@ namespace StockInvestment.Infrastructure.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("Email");
 
-                    b.Property<string>("FullName")
-                        .HasColumnType("text");
-
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsEmailVerified")
                         .HasColumnType("boolean");
-
-                    b.Property<bool>("LockoutEnabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTimeOffset?>("LockoutEnd")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
@@ -1470,17 +1350,6 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("StockInvestment.Domain.Entities.PasswordResetToken", b =>
-                {
-                    b.HasOne("StockInvestment.Domain.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("StockInvestment.Domain.Entities.Portfolio", b =>
                 {
                     b.HasOne("StockInvestment.Domain.Entities.User", "User")
@@ -1490,17 +1359,6 @@ namespace StockInvestment.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("StockInvestment.Domain.Entities.SharedLayout", b =>
-                {
-                    b.HasOne("StockInvestment.Domain.Entities.User", "Owner")
-                        .WithMany()
-                        .HasForeignKey("OwnerId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Owner");
                 });
 
             modelBuilder.Entity("StockInvestment.Domain.Entities.TechnicalIndicator", b =>

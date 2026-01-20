@@ -29,9 +29,15 @@ This project follows Clean Architecture principles with the following layers:
 3. Update `appsettings.json` with your database connection strings
 4. Run database migrations:
    ```bash
-   dotnet ef migrations add InitialCreate --project src/StockInvestment.Infrastructure --startup-project src/StockInvestment.Api
+   # Apply all migrations (including AnalysisReports table)
    dotnet ef database update --project src/StockInvestment.Infrastructure --startup-project src/StockInvestment.Api
+   
+   # Or from Infrastructure directory:
+   cd src/StockInvestment.Infrastructure
+   dotnet ef database update --startup-project ../StockInvestment.Api
    ```
+   
+   **Note:** Ensure PostgreSQL is running and connection string in `appsettings.json` is correct before running migrations.
 5. Run the application:
    ```bash
    dotnet run --project src/StockInvestment.Api
@@ -57,4 +63,18 @@ Update `appsettings.json`:
   }
 }
 ```
+
+**Environment Variables:**
+
+For RAG ingestion, set the internal API key as an environment variable:
+
+```bash
+# Windows PowerShell
+$env:AI_SERVICE_INTERNAL_API_KEY="your-secret-key-for-rag-ingest"
+
+# Linux/Mac
+export AI_SERVICE_INTERNAL_API_KEY="your-secret-key-for-rag-ingest"
+```
+
+This key must match the `INTERNAL_API_KEY` configured in the AI service.
 

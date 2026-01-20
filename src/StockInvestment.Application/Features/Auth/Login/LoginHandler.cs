@@ -48,6 +48,12 @@ public class LoginHandler : IRequestHandler<LoginCommand, LoginDto>
             throw new UnauthorizedException("Invalid email or password");
         }
 
+        if (user.LockoutEnabled && user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTimeOffset.UtcNow)
+        {
+            _logger.LogWarning("Login attempt failed: Account locked for email {Email}", email.Value);
+            throw new UnauthorizedException("Account is locked");
+        }
+
         if (!user.IsActive)
         {
             _logger.LogWarning("Login attempt failed: Account deactivated for email {Email}", email.Value);

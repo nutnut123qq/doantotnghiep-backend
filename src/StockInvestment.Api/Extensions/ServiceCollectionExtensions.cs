@@ -215,6 +215,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEmailService, EmailService>();
         services.AddScoped<IWorkspaceService, WorkspaceService>();
         services.AddScoped<INotificationChannelService, NotificationChannelService>();
+        
+        // Analysis Reports Q&A service (V1 Minimal - NO RAG)
+        services.AddScoped<IAnalysisReportQAService, AnalysisReportQAService>();
 
         return services;
     }

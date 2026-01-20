@@ -7,10 +7,13 @@ public class User
 {
     public Guid Id { get; set; }
     public Email Email { get; set; } = null!;
+    public string? FullName { get; set; }
     public string PasswordHash { get; set; } = null!;
     public UserRole Role { get; set; }
     public bool IsEmailVerified { get; set; }
     public bool IsActive { get; set; }
+    public bool LockoutEnabled { get; set; }
+    public DateTimeOffset? LockoutEnd { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 
@@ -27,6 +30,8 @@ public class User
         Role = UserRole.Investor;
         IsEmailVerified = false;
         IsActive = true;
+        LockoutEnabled = false;
+        LockoutEnd = null;
     }
 }
 

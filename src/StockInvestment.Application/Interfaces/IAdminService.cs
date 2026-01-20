@@ -1,4 +1,6 @@
 using StockInvestment.Domain.Entities;
+using StockInvestment.Domain.Enums;
+using StockInvestment.Application.Features.Admin.Models;
 
 namespace StockInvestment.Application.Interfaces;
 
@@ -36,6 +38,31 @@ public interface IAdminService
     /// Get system statistics
     /// </summary>
     Task<SystemStats> GetSystemStatsAsync();
+
+    /// <summary>
+    /// Create user (admin)
+    /// </summary>
+    Task<AdminActionResult<AdminUserDto>> CreateUserAsync(Guid adminUserId, string email, string password, UserRole role, string? fullName);
+
+    /// <summary>
+    /// Update user info/role (admin)
+    /// </summary>
+    Task<AdminActionResult> UpdateUserAsync(Guid adminUserId, Guid userId, string? email, string? fullName, UserRole? role);
+
+    /// <summary>
+    /// Reset user password (admin)
+    /// </summary>
+    Task<AdminActionResult> ResetPasswordAsync(Guid adminUserId, Guid userId, string newPassword);
+
+    /// <summary>
+    /// Lock user account (admin)
+    /// </summary>
+    Task<AdminActionResult> LockUserAsync(Guid adminUserId, Guid userId);
+
+    /// <summary>
+    /// Unlock user account (admin)
+    /// </summary>
+    Task<AdminActionResult> UnlockUserAsync(Guid adminUserId, Guid userId);
 }
 
 /// <summary>

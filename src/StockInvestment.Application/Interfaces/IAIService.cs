@@ -1,4 +1,5 @@
 using StockInvestment.Application.Contracts.AI;
+using StockInvestment.Application.DTOs.AnalysisReports;
 using System.Text.Json.Serialization;
 
 namespace StockInvestment.Application.Interfaces;
@@ -12,10 +13,35 @@ public interface IAIService
     Task<object> GenerateForecastAsync(Guid tickerId, CancellationToken cancellationToken = default);
     Task<ForecastResult> GenerateForecastBySymbolAsync(string symbol, string timeHorizon = "short", CancellationToken cancellationToken = default);
     Task<ForecastResult> GenerateForecastWithDataAsync(string symbol, string timeHorizon, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
-    Task<QuestionAnswerResult> AnswerQuestionAsync(string question, string context, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Answer question using RAG with filters (new signature for RAG-enabled Q&A)
+    /// </summary>
+    Task<QuestionAnswerResult> AnswerQuestionAsync(
+        string question,
+        string baseContext,
+        string? documentId = null,
+        string? source = null,
+        string? symbol = null,
+        int topK = 6,
+        CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Ingest document into RAG vector store
+    /// </summary>
+    Task<IngestResult> IngestDocumentAsync(
+        string documentId,
+        string source,
+        string text,
+        object metadata,
+        CancellationToken cancellationToken = default);
     Task<ParsedAlert> ParseAlertAsync(string naturalLanguageInput, CancellationToken cancellationToken = default);
     Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
     Task<string?> GetAlertExplanationAsync(string symbol, string alertType, decimal currentValue, decimal threshold, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Answer a question with provided context parts (for Analysis Reports Q&A)
+    /// </summary>
+    Task<AnswerWithContextResult> AnswerWithContextPartsAsync(string question, List<ContextPart> contextParts, CancellationToken cancellationToken = default);
 }
 
 public class ParsedAlert

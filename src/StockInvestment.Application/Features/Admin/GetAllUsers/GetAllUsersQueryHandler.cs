@@ -1,10 +1,10 @@
 using MediatR;
 using StockInvestment.Application.Interfaces;
-using StockInvestment.Domain.Entities;
+using StockInvestment.Application.Features.Admin.Models;
 
 namespace StockInvestment.Application.Features.Admin.GetAllUsers;
 
-public class GetAllUsersQueryHandler : IRequestHandler<GetAllUsersQuery, (IEnumerable<User> Users, int TotalCount)>
+public class GetAllUsersQueryHandler : IRequestHandler<GetAllUsersQuery, (IEnumerable<AdminUserDto> Users, int TotalCount)>
 {
     private readonly IAdminService _adminService;
 
@@ -13,8 +13,10 @@ public class GetAllUsersQueryHandler : IRequestHandler<GetAllUsersQuery, (IEnume
         _adminService = adminService;
     }
 
-    public async Task<(IEnumerable<User> Users, int TotalCount)> Handle(GetAllUsersQuery request, CancellationToken cancellationToken)
+    public async Task<(IEnumerable<AdminUserDto> Users, int TotalCount)> Handle(GetAllUsersQuery request, CancellationToken cancellationToken)
     {
-        return await _adminService.GetAllUsersAsync(request.Page, request.PageSize);
+        var (users, totalCount) = await _adminService.GetAllUsersAsync(request.Page, request.PageSize);
+        var mappedUsers = users.Select(AdminUserDto.FromEntity);
+        return (mappedUsers, totalCount);
     }
 }

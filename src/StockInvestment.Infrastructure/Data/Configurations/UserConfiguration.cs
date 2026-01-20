@@ -35,6 +35,10 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .IsRequired()
             .HasMaxLength(500);
 
+        builder.Property(u => u.FullName)
+            .HasMaxLength(200)
+            .IsRequired(false);
+
         // Role configuration with index
         builder.Property(u => u.Role)
             .HasConversion<string>()
@@ -47,6 +51,9 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         // IsActive index for filtering active users
         builder.HasIndex(u => u.IsActive)
             .HasDatabaseName("IX_Users_IsActive");
+
+        builder.HasIndex(u => u.LockoutEnd)
+            .HasDatabaseName("IX_Users_LockoutEnd");
 
         // IsEmailVerified index
         builder.HasIndex(u => u.IsEmailVerified)
@@ -72,6 +79,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 
         builder.Property(u => u.IsActive)
             .IsRequired();
+
+        builder.Property(u => u.LockoutEnabled)
+            .IsRequired();
+
+        builder.Property(u => u.LockoutEnd)
+            .IsRequired(false);
     }
 }
 

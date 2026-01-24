@@ -12,4 +12,8 @@ public interface INewsService
     Task<News> AddNewsAsync(News news);
     Task<IEnumerable<News>> AddNewsRangeAsync(IEnumerable<News> newsList);
     Task UpdateNewsAsync(News news);
+    /// <summary>
+    /// Get all existing news URLs as a HashSet for efficient duplicate checking
+    /// </summary>
+    Task<HashSet<string>> GetExistingUrlsAsync();
 }

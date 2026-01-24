@@ -124,5 +124,16 @@ public class NewsService : INewsService
             throw;
         }
     }
+
+    public async Task<HashSet<string>> GetExistingUrlsAsync()
+    {
+        var urls = await _context.News
+            .Where(n => n.Url != null)
+            .Select(n => n.Url!)
+            .Distinct()
+            .ToListAsync();
+
+        return new HashSet<string>(urls, StringComparer.OrdinalIgnoreCase);
+    }
 }
 

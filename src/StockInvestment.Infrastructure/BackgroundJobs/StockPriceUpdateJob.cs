@@ -94,12 +94,10 @@ public class StockPriceUpdateJob : BackgroundService
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
             // Push update qua SignalR - gửi từng ticker với event "PriceUpdated"
+            // Chỉ gửi tới group của symbol (clients cần join group để nhận updates)
             foreach (var quote in quotesList)
             {
-                // Gửi tới group của symbol (cho clients đã join group)
                 await hubContext.Clients.Group(quote.Symbol).SendAsync("PriceUpdated", quote, cancellationToken);
-                // Cũng gửi tới All để demo đơn giản
-                await hubContext.Clients.All.SendAsync("PriceUpdated", quote, cancellationToken);
             }
 
             _logger.LogInformation("Successfully updated {Count} stock prices", quotesList.Count);

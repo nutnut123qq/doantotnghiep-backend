@@ -32,18 +32,9 @@ public class NewsController : ControllerBase
         [FromQuery] int pageSize = 20,
         [FromQuery] Guid? tickerId = null)
     {
-        try
-        {
-            var news = await _newsService.GetNewsAsync(page, pageSize, tickerId);
-            // Return empty list instead of null
-            return Ok(news ?? Enumerable.Empty<object>());
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching news");
-            // Return empty array instead of 500
-            return Ok(new List<object>());
-        }
+        var news = await _newsService.GetNewsAsync(page, pageSize, tickerId);
+        // Return empty list instead of null if no news found
+        return Ok(news ?? Enumerable.Empty<object>());
     }
 
     [HttpGet("{id}")]

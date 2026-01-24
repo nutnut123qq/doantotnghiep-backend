@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Entities;
 
 namespace StockInvestment.Infrastructure.BackgroundJobs;
 
@@ -68,26 +69,39 @@ public class NewsCrawlerJob : BackgroundService
 
             _logger.LogInformation("Crawled {Count} news items", newsList.Count);
 
+            // Load existing URLs once into HashSet for efficient duplicate checking
+            var existingUrls = await newsService.GetExistingUrlsAsync();
+            _logger.LogInformation("Loaded {Count} existing URLs for duplicate check", existingUrls.Count);
+
             // Check for duplicates before adding to database
             var addedCount = 0;
+            var newsToAdd = new List<News>();
+
             foreach (var news in newsList)
             {
                 try
                 {
-                    // Simple duplicate check by URL
-                    var existingNews = await newsService.GetNewsAsync(1, 1000);
-                    var isDuplicate = existingNews.Any(n => n.Url == news.Url);
-
-                    if (!isDuplicate)
+                    // Skip if URL is null or already exists
+                    if (string.IsNullOrWhiteSpace(news.Url) || existingUrls.Contains(news.Url))
                     {
-                        await newsService.AddNewsAsync(news);
-                        addedCount++;
+                        continue;
                     }
+
+                    // Mark URL as seen to avoid duplicates within the same batch
+                    existingUrls.Add(news.Url);
+                    newsToAdd.Add(news);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Error adding news item: {Title}", news.Title);
+                    _logger.LogWarning(ex, "Error processing news item: {Title}", news.Title);
                 }
+            }
+
+            // Batch add all new news items
+            if (newsToAdd.Any())
+            {
+                await newsService.AddNewsRangeAsync(newsToAdd);
+                addedCount = newsToAdd.Count;
             }
 
             _logger.LogInformation("Successfully added {Count} new news items to database", addedCount);

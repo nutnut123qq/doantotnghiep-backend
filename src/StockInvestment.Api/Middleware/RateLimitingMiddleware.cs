@@ -73,23 +73,9 @@ public class RateLimitingMiddleware
 
     private string GetClientIpAddress(HttpContext context)
     {
-        // Check for forwarded IP (when behind proxy/load balancer)
-        var forwardedFor = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
-        if (!string.IsNullOrEmpty(forwardedFor))
-        {
-            var ips = forwardedFor.Split(',');
-            if (ips.Length > 0)
-            {
-                return ips[0].Trim();
-            }
-        }
-
-        var realIp = context.Request.Headers["X-Real-IP"].FirstOrDefault();
-        if (!string.IsNullOrEmpty(realIp))
-        {
-            return realIp;
-        }
-
+        // P0-4: Use RemoteIpAddress which is now populated by ForwardedHeadersMiddleware
+        // ForwardedHeadersMiddleware validates X-Forwarded-For/X-Real-IP from trusted proxies only
+        // and sets Connection.RemoteIpAddress accordingly
         return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
     }
 

@@ -14,6 +14,10 @@ public static class ApplicationBuilderExtensions
     /// </summary>
     public static WebApplication ConfigurePipeline(this WebApplication app)
     {
+        // P0-4: Use ForwardedHeaders middleware FIRST (before other middleware that reads IP)
+        // This processes X-Forwarded-For, X-Real-IP headers from trusted proxies only
+        app.UseForwardedHeaders();
+        
         // Configure the HTTP request pipeline
         if (app.Environment.IsDevelopment())
         {

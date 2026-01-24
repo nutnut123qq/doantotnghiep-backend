@@ -32,17 +32,10 @@ public class DataSourceController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<GetDataSourcesResponse>> GetAll([FromQuery] DataSourceType? type)
     {
-        try
-        {
-            var query = new GetDataSourcesQuery { Type = type };
-            var result = await _mediator.Send(query);
-            return Ok(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting data sources");
-            return StatusCode(500, "An error occurred while fetching data sources");
-        }
+        // P1-2: Let GlobalExceptionHandlerMiddleware handle exceptions - no need for try/catch here
+        var query = new GetDataSourcesQuery { Type = type };
+        var result = await _mediator.Send(query);
+        return Ok(result);
     }
 
     /// <summary>
@@ -51,24 +44,17 @@ public class DataSourceController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<StockInvestment.Application.Features.Admin.DataSources.GetDataSources.DataSourceDto>> GetById(Guid id)
     {
-        try
+        // P1-2: Let GlobalExceptionHandlerMiddleware handle exceptions
+        var query = new GetDataSourcesQuery();
+        var result = await _mediator.Send(query);
+        var dataSource = result.DataSources.FirstOrDefault(ds => ds.Id == id);
+        
+        if (dataSource == null)
         {
-            var query = new GetDataSourcesQuery();
-            var result = await _mediator.Send(query);
-            var dataSource = result.DataSources.FirstOrDefault(ds => ds.Id == id);
-            
-            if (dataSource == null)
-            {
-                return NotFound();
-            }
-            
-            return Ok(dataSource);
+            return NotFound();
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting data source {Id}", id);
-            return StatusCode(500, "An error occurred while fetching data source");
-        }
+        
+        return Ok(dataSource);
     }
 
     /// <summary>
@@ -77,16 +63,9 @@ public class DataSourceController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<StockInvestment.Application.Features.Admin.DataSources.CreateDataSource.DataSourceDto>> Create([FromBody] CreateDataSourceCommand command)
     {
-        try
-        {
-            var result = await _mediator.Send(command);
-            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating data source");
-            return StatusCode(500, "An error occurred while creating data source");
-        }
+        // P1-2: Let GlobalExceptionHandlerMiddleware handle exceptions
+        var result = await _mediator.Send(command);
+        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
     /// <summary>
@@ -95,21 +74,10 @@ public class DataSourceController : ControllerBase
     [HttpPut("{id}")]
     public async Task<ActionResult<StockInvestment.Application.Features.Admin.DataSources.UpdateDataSource.DataSourceDto>> Update(Guid id, [FromBody] UpdateDataSourceCommand command)
     {
-        try
-        {
-            command.Id = id;
-            var result = await _mediator.Send(command);
-            return Ok(result);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating data source {Id}", id);
-            return StatusCode(500, "An error occurred while updating data source");
-        }
+        // P1-2: Let GlobalExceptionHandlerMiddleware handle exceptions (InvalidOperationException -> 400 BadRequest)
+        command.Id = id;
+        var result = await _mediator.Send(command);
+        return Ok(result);
     }
 
     /// <summary>
@@ -118,17 +86,10 @@ public class DataSourceController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<ActionResult> Delete(Guid id)
     {
-        try
-        {
-            var command = new DeleteDataSourceCommand { Id = id };
-            await _mediator.Send(command);
-            return NoContent();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting data source {Id}", id);
-            return StatusCode(500, "An error occurred while deleting data source");
-        }
+        // P1-2: Let GlobalExceptionHandlerMiddleware handle exceptions
+        var command = new DeleteDataSourceCommand { Id = id };
+        await _mediator.Send(command);
+        return NoContent();
     }
 
     /// <summary>
@@ -137,17 +98,11 @@ public class DataSourceController : ControllerBase
     [HttpPost("{id}/test")]
     public async Task<ActionResult<TestConnectionResponse>> TestConnection(Guid id)
     {
-        try
-        {
-            var command = new TestConnectionCommand { Id = id };
-            var result = await _mediator.Send(command);
-            return Ok(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error testing connection for data source {Id}", id);
-            return StatusCode(500, "An error occurred while testing connection");
-        }
+        // P1-2: Let GlobalExceptionHandlerMiddleware handle exceptions
+        // InvalidOperationException from SSRF validation will be handled as 400 BadRequest
+        var command = new TestConnectionCommand { Id = id };
+        var result = await _mediator.Send(command);
+        return Ok(result);
     }
 }
 

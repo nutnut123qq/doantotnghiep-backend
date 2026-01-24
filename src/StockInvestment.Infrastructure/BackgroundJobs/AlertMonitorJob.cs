@@ -89,6 +89,19 @@ public class AlertMonitorJob : BackgroundService
 
                 if (shouldTrigger)
                 {
+                    // P0-3: Try to atomically mark alert as triggered to prevent duplicate notifications
+                    // Only proceed if this instance successfully claimed the alert
+                    var claimed = await unitOfWork.Alerts.TryMarkAsTriggeredAsync(alert.Id, DateTime.UtcNow, cancellationToken);
+                    if (!claimed)
+                    {
+                        _logger.LogDebug("Alert {AlertId} was already triggered by another instance, skipping", alert.Id);
+                        continue;
+                    }
+
+                    // Reload alert to get updated state
+                    alert.IsActive = false;
+                    alert.TriggeredAt = DateTime.UtcNow;
+                    
                     await TriggerAlertAsync(alert, currentValue, unitOfWork, cancellationToken);  // Pass snapshot
                 }
             }
@@ -183,9 +196,9 @@ public class AlertMonitorJob : BackgroundService
             context.AiExplanation = "AI explanation unavailable";
         }
 
-        // Persist TriggeredAt TRƯỚC khi gửi notifications (anti-spam)
-        alert.TriggeredAt = context.TriggeredAt;
-        alert.IsActive = false;
+        // P0-3: Alert is already marked as triggered atomically in CheckAlertsAsync
+        // No need to update again here - just ensure state is saved if needed
+        // (The atomic update already set IsActive=false and TriggeredAt, but we save any other changes)
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Send SignalR notification

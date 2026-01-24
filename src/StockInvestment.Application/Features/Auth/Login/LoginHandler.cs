@@ -32,7 +32,16 @@ public class LoginHandler : IRequestHandler<LoginCommand, LoginDto>
         _passwordHasher = passwordHasher;
         _logger = logger;
         _configuration = configuration;
-        _jwtSecret = configuration["JWT:Secret"] ?? "your-super-secret-key-change-in-production-min-32-chars";
+        
+        // P0-1: Fail-fast if JWT secret is missing (should be validated at startup, but double-check here)
+        _jwtSecret = configuration["JWT:Secret"] 
+            ?? throw new InvalidOperationException("JWT:Secret is required in configuration");
+        
+        if (_jwtSecret.Length < 32)
+        {
+            throw new InvalidOperationException($"JWT:Secret must be at least 32 characters long. Current length: {_jwtSecret.Length}");
+        }
+        
         _jwtIssuer = configuration["JWT:Issuer"] ?? "StockInvestmentApi";
         _jwtAudience = configuration["JWT:Audience"] ?? "StockInvestmentClient";
     }

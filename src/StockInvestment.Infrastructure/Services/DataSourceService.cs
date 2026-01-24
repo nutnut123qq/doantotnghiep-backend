@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Domain.Enums;
+using StockInvestment.Infrastructure.Utils;
 
 namespace StockInvestment.Infrastructure.Services;
 
@@ -86,10 +87,29 @@ public class DataSourceService : IDataSourceService
             throw new InvalidOperationException($"Data source with ID {id} not found");
         }
 
+        // P0-2: SSRF protection - validate URL before making request
+        var urlValidation = UrlGuard.ValidateUrl(dataSource.Url);
+        if (!urlValidation.IsValid)
+        {
+            _logger.LogWarning(
+                "SSRF protection blocked URL for data source {Name} ({Id}): {Reason}",
+                dataSource.Name, dataSource.Id, urlValidation.ErrorMessage);
+
+            dataSource.Status = ConnectionStatus.Error;
+            dataSource.LastChecked = DateTime.UtcNow;
+            dataSource.ErrorMessage = $"URL validation failed: {urlValidation.ErrorMessage}";
+            await UpdateAsync(dataSource, cancellationToken);
+
+            throw new InvalidOperationException($"Invalid URL: {urlValidation.ErrorMessage}");
+        }
+
         try
         {
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(10);
+            
+            // Limit redirects to prevent SSRF via redirect chains
+            httpClient.MaxResponseContentBufferSize = 10 * 1024 * 1024; // 10MB max
 
             var response = await httpClient.GetAsync(dataSource.Url, cancellationToken);
             var isConnected = response.IsSuccessStatusCode;

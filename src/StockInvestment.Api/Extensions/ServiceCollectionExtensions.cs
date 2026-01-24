@@ -18,6 +18,8 @@ using Microsoft.Extensions.Http;
 using Polly;
 using Polly.Extensions.Http;
 using ICacheKeyGenerator = StockInvestment.Application.Interfaces.ICacheKeyGenerator;
+using Microsoft.AspNetCore.HttpOverrides;
+using System.Net;
 
 namespace StockInvestment.Api.Extensions;
 
@@ -28,6 +30,59 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
     {
+        // P0-4: Configure ForwardedHeadersOptions for trusted proxies
+        // This ensures X-Forwarded-For and X-Real-IP headers are only trusted from known proxies
+        services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XRealIp;
+            
+            // Clear default trusted proxies (security: don't trust all by default)
+            options.KnownProxies.Clear();
+            options.KnownNetworks.Clear();
+            
+            // Allow configuration of trusted proxies via appsettings
+            var trustedProxies = configuration.GetSection("TrustedProxies:IPs").Get<string[]>();
+            if (trustedProxies != null)
+            {
+                foreach (var proxyIp in trustedProxies)
+                {
+                    if (IPAddress.TryParse(proxyIp, out var ip))
+                    {
+                        options.KnownProxies.Add(ip);
+                    }
+                }
+            }
+            
+            // Allow configuration of trusted networks via CIDR notation
+            var trustedNetworks = configuration.GetSection("TrustedProxies:Networks").Get<string[]>();
+            if (trustedNetworks != null)
+            {
+                foreach (var network in trustedNetworks)
+                {
+                    var parts = network.Split('/');
+                    if (parts.Length == 2 
+                        && IPAddress.TryParse(parts[0], out var networkIp)
+                        && int.TryParse(parts[1], out var prefixLength))
+                    {
+                        options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(networkIp, prefixLength));
+                    }
+                }
+            }
+            
+            // In development, allow localhost (for testing behind reverse proxy)
+            if (configuration.GetValue<string>("ASPNETCORE_ENVIRONMENT") == "Development")
+            {
+                options.KnownProxies.Add(IPAddress.Parse("127.0.0.1"));
+                options.KnownProxies.Add(IPAddress.Parse("::1"));
+            }
+            
+            // Limit the number of entries in forwarded headers to prevent header injection
+            options.ForwardLimit = 1;
+            
+            // Require that all forwarded headers are from known proxies
+            options.RequireHeaderSymmetry = false; // Set to true if all headers must match
+        });
+        
         services.AddControllers();
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen();
@@ -106,7 +161,34 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddAuthenticationServices(this IServiceCollection services, IConfiguration configuration)
     {
-        var jwtSecret = configuration["JWT:Secret"] ?? "your-super-secret-key-change-in-production-min-32-chars";
+        // P0-1: Fail-fast if JWT secret is missing or too short
+        var jwtSecret = configuration["JWT:Secret"];
+        if (string.IsNullOrWhiteSpace(jwtSecret))
+        {
+            throw new InvalidOperationException(
+                "JWT:Secret is required. Please set it in configuration (appsettings.json or environment variable). " +
+                "Minimum length: 32 characters for security.");
+        }
+
+        if (jwtSecret.Length < 32)
+        {
+            throw new InvalidOperationException(
+                $"JWT:Secret must be at least 32 characters long. Current length: {jwtSecret.Length}. " +
+                "Please set a stronger secret in configuration.");
+        }
+
+        // Check if using default/example secret (security risk)
+        var defaultSecrets = new[]
+        {
+            "your-super-secret-key-change-in-production-min-32-chars",
+            "YOUR_JWT_SECRET_KEY_MIN_32_CHARACTERS_LONG_CHANGE_THIS"
+        };
+        if (defaultSecrets.Contains(jwtSecret))
+        {
+            throw new InvalidOperationException(
+                "JWT:Secret cannot use the default/example value. Please set a unique, strong secret in configuration.");
+        }
+
         var jwtIssuer = configuration["JWT:Issuer"] ?? "StockInvestmentApi";
         var jwtAudience = configuration["JWT:Audience"] ?? "StockInvestmentClient";
         var isProduction = configuration.GetValue<string>("ASPNETCORE_ENVIRONMENT") == "Production";

@@ -78,6 +78,23 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<StockTicker>().ToTable("StockTickers");
         modelBuilder.Entity<Watchlist>().ToTable("Watchlists");
         modelBuilder.Entity<Alert>().ToTable("Alerts");
+        
+        // P1-1: Configure indexes for Alerts table for performance
+        // Index for AlertMonitorJob query: WHERE IsActive = true AND TickerId IS NOT NULL
+        modelBuilder.Entity<Alert>()
+            .HasIndex(a => new { a.IsActive, a.TriggeredAt })
+            .HasDatabaseName("IX_Alerts_IsActive_TriggeredAt");
+        
+        // Index for user queries: WHERE UserId = X AND IsActive = Y
+        modelBuilder.Entity<Alert>()
+            .HasIndex(a => new { a.UserId, a.IsActive })
+            .HasDatabaseName("IX_Alerts_UserId_IsActive");
+        
+        // Index for ticker queries: WHERE TickerId = X AND IsActive = Y
+        modelBuilder.Entity<Alert>()
+            .HasIndex(a => new { a.TickerId, a.IsActive })
+            .HasDatabaseName("IX_Alerts_TickerId_IsActive");
+        
         modelBuilder.Entity<News>().ToTable("News");
         
         // Unique index on News.Url for multi-instance dedupe

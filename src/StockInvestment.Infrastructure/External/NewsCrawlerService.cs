@@ -20,7 +20,6 @@ public class NewsCrawlerService : INewsCrawlerService
     {
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient("NewsCrawler");
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
     }
 
     public async Task<IEnumerable<News>> CrawlNewsAsync(int maxArticles = 20)

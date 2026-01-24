@@ -267,7 +267,7 @@ public class ApplicationDbContext : DbContext
         
         modelBuilder.Entity<AIInsight>()
             .HasIndex(i => i.DismissedAt)
-            .HasFilter("[DismissedAt] IS NULL");
+            .HasFilter("\"DismissedAt\" IS NULL");
 
         // Configure EmailVerificationToken
         modelBuilder.Entity<EmailVerificationToken>()

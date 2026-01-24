@@ -67,13 +67,18 @@ public class StockPriceUpdateJob : BackgroundService
             var quotes = await vnStockService.GetQuotesAsync(vn30Symbols);
             var quotesList = quotes.ToList();
 
+            // Batch load all existing tickers by Symbol to avoid N+1 queries
+            var symbols = quotesList.Select(q => q.Symbol).ToList();
+            var existingStocks = (await unitOfWork.Repository<Domain.Entities.StockTicker>()
+                .FindAsync(s => symbols.Contains(s.Symbol), cancellationToken))
+                .ToList();
+
+            var existingStocksDict = existingStocks.ToDictionary(s => s.Symbol, StringComparer.OrdinalIgnoreCase);
+
+            // Update existing or add new tickers in-memory
             foreach (var quote in quotesList)
             {
-                // Kiểm tra xem stock đã tồn tại trong DB chưa
-                var existingStock = await unitOfWork.Repository<Domain.Entities.StockTicker>()
-                    .FirstOrDefaultAsync(s => s.Symbol == quote.Symbol, cancellationToken);
-
-                if (existingStock != null)
+                if (existingStocksDict.TryGetValue(quote.Symbol, out var existingStock))
                 {
                     // Cập nhật giá
                     existingStock.CurrentPrice = quote.CurrentPrice;
@@ -91,6 +96,7 @@ public class StockPriceUpdateJob : BackgroundService
                 }
             }
 
+            // Single SaveChanges for all updates
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
             // Push update qua SignalR - gửi từng ticker với event "PriceUpdated"

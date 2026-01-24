@@ -40,59 +40,45 @@ public class NewsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetNewsById(Guid id)
     {
-        try
-        {
-            var news = await _newsService.GetNewsByIdAsync(id);
-            if (news == null)
-                return NotFound($"News with ID {id} not found");
-                
-            return Ok(news);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching news {Id}", id);
-            return StatusCode(500, "An error occurred while retrieving news");
-        }
+        var news = await _newsService.GetNewsByIdAsync(id);
+        if (news == null)
+            return NotFound($"News with ID {id} not found");
+            
+        return Ok(news);
     }
 
     [HttpPost("{id}/summarize")]
     public async Task<IActionResult> RequestSummarization(Guid id)
     {
-        try
+        // Nếu có RabbitMQ, queue như cũ
+        if (_rabbitMQService != null)
         {
-            // Nếu có RabbitMQ, queue như cũ
-            if (_rabbitMQService != null)
-            {
-                _rabbitMQService.Publish("news_summarize", new { NewsId = id });
-                return Accepted(new { message = "Summarization request queued", newsId = id });
-            }
-            
-            // Fallback sync nếu không có RabbitMQ
-            if (_aiService == null)
-            {
-                return StatusCode(503, "AI service is not available");
-            }
+            _rabbitMQService.Publish("news_summarize", new { NewsId = id });
+            return Accepted(new { message = "Summarization request queued", newsId = id });
+        }
+        
+        // Fallback sync nếu không có RabbitMQ
+        if (_aiService == null)
+        {
+            return Problem(
+                detail: "AI service is not available",
+                statusCode: 503);
+        }
 
-            var news = await _newsService.GetNewsByIdAsync(id);
-            if (news == null)
-                return NotFound($"News with ID {id} not found");
-                
-            // Call AI service
-            var summaryResult = await _aiService.SummarizeNewsDetailedAsync(news.Content);
+        var news = await _newsService.GetNewsByIdAsync(id);
+        if (news == null)
+            return NotFound($"News with ID {id} not found");
             
-            // Update DB
-            news.Summary = summaryResult.Summary;
-            news.Sentiment = ParseSentiment(summaryResult.Sentiment);
-            news.ImpactAssessment = summaryResult.ImpactAssessment;
-            await _newsService.UpdateNewsAsync(news);
-            
-            return Ok(summaryResult);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error summarizing news {Id}", id);
-            return StatusCode(500, "An error occurred while summarizing news");
-        }
+        // Call AI service
+        var summaryResult = await _aiService.SummarizeNewsDetailedAsync(news.Content);
+        
+        // Update DB
+        news.Summary = summaryResult.Summary;
+        news.Sentiment = ParseSentiment(summaryResult.Sentiment);
+        news.ImpactAssessment = summaryResult.ImpactAssessment;
+        await _newsService.UpdateNewsAsync(news);
+        
+        return Ok(summaryResult);
     }
 
     private Sentiment? ParseSentiment(string sentimentString)

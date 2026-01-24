@@ -79,6 +79,16 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<Watchlist>().ToTable("Watchlists");
         modelBuilder.Entity<Alert>().ToTable("Alerts");
         modelBuilder.Entity<News>().ToTable("News");
+        
+        // Unique index on News.Url for multi-instance dedupe
+        // Note: For case-insensitive unique index on lower("Url"), we'll use raw SQL in migration
+        // This configuration creates a regular unique index; migration will enhance it with lower()
+        modelBuilder.Entity<News>()
+            .HasIndex(n => n.Url)
+            .IsUnique()
+            .HasFilter("\"Url\" IS NOT NULL")
+            .HasDatabaseName("IX_News_Url_Unique");
+        
         modelBuilder.Entity<FinancialReport>().ToTable("FinancialReports");
         modelBuilder.Entity<Layout>().ToTable("Layouts");
         modelBuilder.Entity<TechnicalIndicator>().ToTable("TechnicalIndicators");

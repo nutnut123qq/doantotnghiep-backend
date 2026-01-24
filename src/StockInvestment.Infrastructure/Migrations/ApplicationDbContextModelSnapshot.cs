@@ -233,6 +233,9 @@ namespace StockInvestment.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("IsActive", "TriggeredAt")
+                        .HasDatabaseName("IX_Alerts_IsActive_TriggeredAt");
+
                     b.HasIndex("TickerId");
 
                     b.HasIndex("UserId");

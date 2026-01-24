@@ -103,16 +103,39 @@ public class DataSourceService : IDataSourceService
             throw new InvalidOperationException($"Invalid URL: {urlValidation.ErrorMessage}");
         }
 
+        const int MaxResponseBytes = 1 * 1024 * 1024; // 1MB hard cap for TestConnection
+
         try
         {
-            using var httpClient = _httpClientFactory.CreateClient();
-            httpClient.Timeout = TimeSpan.FromSeconds(10);
-            
-            // Limit redirects to prevent SSRF via redirect chains
-            httpClient.MaxResponseContentBufferSize = 10 * 1024 * 1024; // 10MB max
+            // P0-2: Use dedicated client with HttpClientHandler.MaxAutomaticRedirections = 3 (enforced in DI)
+            using var httpClient = _httpClientFactory.CreateClient("DataSourceTestConnection");
 
-            var response = await httpClient.GetAsync(dataSource.Url, cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Get, dataSource.Url);
+            using var response = await httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+
             var isConnected = response.IsSuccessStatusCode;
+
+            // P0-2: Hard cap response size — consume body only up to limit, then dispose
+            if (response.Content != null)
+            {
+                var contentLength = response.Content.Headers.ContentLength;
+                if (contentLength.HasValue && contentLength.Value > MaxResponseBytes)
+                {
+                    _logger.LogWarning(
+                        "SSRF guard: response size {Size} exceeds limit {Limit} for {Name}",
+                        contentLength.Value, MaxResponseBytes, dataSource.Name);
+                    dataSource.Status = ConnectionStatus.Error;
+                    dataSource.LastChecked = DateTime.UtcNow;
+                    dataSource.ErrorMessage = $"Response size {contentLength.Value} exceeds allowed limit ({MaxResponseBytes} bytes)";
+                    await UpdateAsync(dataSource, cancellationToken);
+                    return false;
+                }
+
+                await ConsumeContentWithLimitAsync(response.Content, MaxResponseBytes, cancellationToken);
+            }
 
             dataSource.Status = isConnected ? ConnectionStatus.Connected : ConnectionStatus.Disconnected;
             dataSource.LastChecked = DateTime.UtcNow;
@@ -139,6 +162,28 @@ public class DataSourceService : IDataSourceService
             _logger.LogError(ex, "Error testing connection for data source {Name}", dataSource.Name);
 
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Consumes response content stream up to maxBytes to enforce SSRF response-size cap.
+    /// Reads in chunks and stops once limit is reached; then disposes the stream.
+    /// </summary>
+    private static async Task ConsumeContentWithLimitAsync(
+        HttpContent content,
+        int maxBytes,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        var buffer = new byte[Math.Min(64 * 1024, maxBytes)];
+        var totalRead = 0;
+        int read;
+        while (totalRead < maxBytes)
+        {
+            var toRead = Math.Min(buffer.Length, maxBytes - totalRead);
+            read = await stream.ReadAsync(buffer.AsMemory(0, toRead), cancellationToken);
+            if (read == 0) break;
+            totalRead += read;
         }
     }
 }

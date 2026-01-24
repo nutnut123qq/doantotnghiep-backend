@@ -400,6 +400,17 @@ public static class ServiceCollectionExtensions
                 client.Timeout = TimeSpan.FromSeconds(5);
             });
 
+        // P0-2 SSRF: Dedicated HttpClient for DataSource TestConnection with enforced redirect limit and no retries
+        services.AddHttpClient("DataSourceTestConnection", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            MaxAutomaticRedirections = 3,
+            AllowAutoRedirect = true
+        });
+
         // Register notification channel senders
         services.AddTransient<INotificationChannelSender>(sp =>
             new Infrastructure.Services.NotificationChannels.SlackNotificationSender(

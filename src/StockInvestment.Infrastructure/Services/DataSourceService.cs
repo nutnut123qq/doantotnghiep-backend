@@ -104,24 +104,108 @@ public class DataSourceService : IDataSourceService
         }
 
         const int MaxResponseBytes = 1 * 1024 * 1024; // 1MB hard cap for TestConnection
+        const int MaxRedirects = 3; // P0-2: Maximum redirects allowed
 
         try
         {
-            // P0-2: Use dedicated client with HttpClientHandler.MaxAutomaticRedirections = 3 (enforced in DI)
+            // P0-2: Use dedicated client with auto-redirect DISABLED - we'll manually follow redirects
             using var httpClient = _httpClientFactory.CreateClient("DataSourceTestConnection");
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, dataSource.Url);
-            using var response = await httpClient.SendAsync(
-                request,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+            var currentUrl = dataSource.Url;
+            var redirectCount = 0;
+            HttpResponseMessage? finalResponse = null;
 
-            var isConnected = response.IsSuccessStatusCode;
+            // P0-2: Manually follow redirects with validation at each step
+            while (redirectCount <= MaxRedirects)
+            {
+                // Validate current URL before making request
+                var urlValidation = UrlGuard.ValidateUrl(currentUrl);
+                if (!urlValidation.IsValid)
+                {
+                    _logger.LogWarning(
+                        "SSRF protection blocked redirect URL for data source {Name} ({Id}) at step {Step}: {Reason}",
+                        dataSource.Name, dataSource.Id, redirectCount, urlValidation.ErrorMessage);
+                    
+                    dataSource.Status = ConnectionStatus.Error;
+                    dataSource.LastChecked = DateTime.UtcNow;
+                    dataSource.ErrorMessage = $"Redirect validation failed at step {redirectCount}: {urlValidation.ErrorMessage}";
+                    await UpdateAsync(dataSource, cancellationToken);
+                    
+                    throw new InvalidOperationException($"Invalid redirect URL: {urlValidation.ErrorMessage}");
+                }
+
+                using var request = new HttpRequestMessage(HttpMethod.Get, currentUrl);
+                var response = await httpClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+
+                // If not a redirect, use this as final response
+                if (!IsRedirectResponse(response.StatusCode))
+                {
+                    finalResponse = response;
+                    break;
+                }
+
+                // Check redirect count limit
+                if (redirectCount >= MaxRedirects)
+                {
+                    _logger.LogWarning(
+                        "SSRF protection: Maximum redirects ({MaxRedirects}) exceeded for data source {Name} ({Id})",
+                        MaxRedirects, dataSource.Name, dataSource.Id);
+                    
+                    dataSource.Status = ConnectionStatus.Error;
+                    dataSource.LastChecked = DateTime.UtcNow;
+                    dataSource.ErrorMessage = $"Maximum redirects ({MaxRedirects}) exceeded";
+                    await UpdateAsync(dataSource, cancellationToken);
+                    
+                    response.Dispose();
+                    return false;
+                }
+
+                // Get redirect location
+                var location = response.Headers.Location?.ToString();
+                if (string.IsNullOrWhiteSpace(location))
+                {
+                    // No Location header, use this response as final
+                    finalResponse = response;
+                    break;
+                }
+
+                // Resolve relative URLs
+                if (Uri.TryCreate(new Uri(currentUrl), location, out var redirectUri))
+                {
+                    currentUrl = redirectUri.ToString();
+                    redirectCount++;
+                    _logger.LogDebug(
+                        "Following redirect {Count}/{Max} for data source {Name}: {From} -> {To}",
+                        redirectCount, MaxRedirects, dataSource.Name, dataSource.Url, currentUrl);
+                    
+                    // Dispose response before next iteration
+                    response.Dispose();
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Invalid redirect location '{Location}' for data source {Name} ({Id})",
+                        location, dataSource.Name, dataSource.Id);
+                    // Use this response as final
+                    finalResponse = response;
+                    break;
+                }
+            }
+
+            if (finalResponse == null)
+            {
+                throw new InvalidOperationException("Failed to get response");
+            }
+
+            var isConnected = finalResponse.IsSuccessStatusCode;
 
             // P0-2: Hard cap response size — consume body only up to limit, then dispose
-            if (response.Content != null)
+            if (finalResponse.Content != null)
             {
-                var contentLength = response.Content.Headers.ContentLength;
+                var contentLength = finalResponse.Content.Headers.ContentLength;
                 if (contentLength.HasValue && contentLength.Value > MaxResponseBytes)
                 {
                     _logger.LogWarning(
@@ -131,15 +215,18 @@ public class DataSourceService : IDataSourceService
                     dataSource.LastChecked = DateTime.UtcNow;
                     dataSource.ErrorMessage = $"Response size {contentLength.Value} exceeds allowed limit ({MaxResponseBytes} bytes)";
                     await UpdateAsync(dataSource, cancellationToken);
+                    finalResponse.Dispose();
                     return false;
                 }
 
-                await ConsumeContentWithLimitAsync(response.Content, MaxResponseBytes, cancellationToken);
+                await ConsumeContentWithLimitAsync(finalResponse.Content, MaxResponseBytes, cancellationToken);
             }
 
             dataSource.Status = isConnected ? ConnectionStatus.Connected : ConnectionStatus.Disconnected;
             dataSource.LastChecked = DateTime.UtcNow;
-            dataSource.ErrorMessage = isConnected ? null : $"HTTP {response.StatusCode}: {response.ReasonPhrase}";
+            dataSource.ErrorMessage = isConnected ? null : $"HTTP {finalResponse.StatusCode}: {finalResponse.ReasonPhrase}";
+            
+            finalResponse.Dispose();
 
             await UpdateAsync(dataSource, cancellationToken);
 
@@ -163,6 +250,19 @@ public class DataSourceService : IDataSourceService
 
             return false;
         }
+    }
+
+    /// <summary>
+    /// P0-2: Check if HTTP status code indicates a redirect
+    /// </summary>
+    private static bool IsRedirectResponse(System.Net.HttpStatusCode statusCode)
+    {
+        return statusCode == System.Net.HttpStatusCode.MovedPermanently ||
+               statusCode == System.Net.HttpStatusCode.Found ||
+               statusCode == System.Net.HttpStatusCode.SeeOther ||
+               statusCode == System.Net.HttpStatusCode.TemporaryRedirect ||
+               statusCode == System.Net.HttpStatusCode.PermanentRedirect ||
+               (int)statusCode == 308; // Permanent Redirect
     }
 
     /// <summary>

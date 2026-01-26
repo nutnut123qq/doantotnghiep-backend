@@ -218,6 +218,18 @@ public static class ServiceCollectionExtensions
             };
         });
 
+        // P0-1: Add authorization policies
+        services.AddAuthorization(options =>
+        {
+            // Admin policy - requires Admin role
+            options.AddPolicy("Admin", policy =>
+                policy.RequireRole("Admin", "SuperAdmin"));
+
+            // AnalystOrAdmin policy - requires Admin or Analyst role (Analyst can be added later)
+            options.AddPolicy("AnalystOrAdmin", policy =>
+                policy.RequireRole("Admin", "SuperAdmin", "Analyst"));
+        });
+
         return services;
     }
 
@@ -240,6 +252,14 @@ public static class ServiceCollectionExtensions
         // Register as Singleton since it's used in middleware (which is resolved from root provider)
         // and RedisCacheService is stateless and thread-safe
         services.AddSingleton<ICacheService, RedisCacheService>();
+
+        // P1-2: Register distributed lock factory (transient per job execution)
+        services.AddTransient<Func<IDistributedLock>>(sp =>
+        {
+            return () => new Infrastructure.Services.RedisDistributedLock(
+                sp.GetRequiredService<IConnectionMultiplexer>(),
+                sp.GetRequiredService<ILogger<Infrastructure.Services.RedisDistributedLock>>());
+        });
 
         return services;
     }
@@ -302,6 +322,7 @@ public static class ServiceCollectionExtensions
         
         // Analysis Reports Q&A service (V1 Minimal - NO RAG)
         services.AddScoped<IAnalysisReportQAService, AnalysisReportQAService>();
+        services.AddScoped<IAnalysisReportService, AnalysisReportService>(); // P2-1: Add AnalysisReportService
 
         return services;
     }
@@ -409,15 +430,15 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         });
 
-        // P0-2 SSRF: Dedicated HttpClient for DataSource TestConnection with enforced redirect limit and no retries
+        // P0-2 SSRF: Dedicated HttpClient for DataSource TestConnection with auto-redirect DISABLED
+        // Redirects will be manually followed with validation at each step
         services.AddHttpClient("DataSourceTestConnection", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(10);
         })
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
         {
-            MaxAutomaticRedirections = 3,
-            AllowAutoRedirect = true
+            AllowAutoRedirect = false // P0-2: Disable auto-redirect to validate each redirect URL
         });
 
         // Register notification channel senders
@@ -496,15 +517,16 @@ public static class ServiceCollectionExtensions
         var redisConnection = configuration.GetConnectionString("Redis")
             ?? "localhost:6379";
 
+        // P2-1: Add health checks with "ready" tag for /health/ready endpoint
         services.AddHealthChecks()
             .AddNpgSql(
                 connectionString,
                 name: "postgresql",
-                tags: new[] { "db", "sql", "postgresql" })
+                tags: new[] { "db", "sql", "postgresql", "ready" }) // P2-1: Add "ready" tag
             .AddRedis(
                 redisConnection,
                 name: "redis",
-                tags: new[] { "cache", "redis" });
+                tags: new[] { "cache", "redis", "ready" }); // P2-1: Add "ready" tag
 
         return services;
     }

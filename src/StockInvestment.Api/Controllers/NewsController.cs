@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Enums;
@@ -47,7 +48,16 @@ public class NewsController : ControllerBase
         return Ok(news);
     }
 
+    /// <summary>
+    /// Request summarization for a news article
+    /// P0-1: Requires authentication to prevent abuse and protect AI service costs
+    /// </summary>
     [HttpPost("{id}/summarize")]
+    [Authorize] // P0-1: Require authentication (all authenticated users can use, but rate limiting should be applied)
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> RequestSummarization(Guid id)
     {
         // Nếu có RabbitMQ, queue như cũ

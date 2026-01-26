@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.DTOs.StockData;
 
@@ -14,17 +15,20 @@ public class StockDataController : ControllerBase
     private readonly ICacheService _cacheService;
     private readonly ILogger<StockDataController> _logger;
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
+    private readonly bool _allowMockMarketData;
 
     public StockDataController(
         IVNStockService vnStockService,
         ICacheService cacheService,
         ILogger<StockDataController> logger,
-        ICacheKeyGenerator cacheKeyGenerator)
+        ICacheKeyGenerator cacheKeyGenerator,
+        IConfiguration configuration)
     {
         _vnStockService = vnStockService;
         _cacheService = cacheService;
         _logger = logger;
         _cacheKeyGenerator = cacheKeyGenerator;
+        _allowMockMarketData = configuration.GetValue<bool>("Features:AllowMockMarketData", defaultValue: false);
     }
 
     /// <summary>
@@ -51,11 +55,24 @@ public class StockDataController : ControllerBase
                     
                     var data = await _vnStockService.GetHistoricalDataAsync(symbol, start, end);
                     
-                    // If no data from external service, generate mock data for demo
+                    // P0-3: If no data from external service, check feature flag before using mock data
                     if (data == null || !data.Any())
                     {
-                        _logger.LogWarning("No historical data from external service for {Symbol}, using mock data", symbol);
-                        data = GenerateMockHistoricalData(symbol, start, end);
+                        if (_allowMockMarketData)
+                        {
+                            _logger.LogWarning(
+                                "No historical data from external service for {Symbol}, using mock data (AllowMockMarketData=true)",
+                                symbol);
+                            data = GenerateMockHistoricalData(symbol, start, end);
+                        }
+                        else
+                        {
+                            _logger.LogError(
+                                "No historical data from external service for {Symbol} and mock data is disabled (AllowMockMarketData=false). Returning 503.",
+                                symbol);
+                            throw new InvalidOperationException(
+                                $"Historical data unavailable for symbol {symbol}. External service returned no data and mock data is disabled in production.");
+                        }
                     }
                     
                     return data.Select(d => new OHLCVResponseDto
@@ -72,6 +89,11 @@ public class StockDataController : ControllerBase
             );
 
             return Ok(ohlcvData);
+        }
+        catch (InvalidOperationException)
+        {
+            // P0-3: Re-throw InvalidOperationException as 503 Service Unavailable
+            throw;
         }
         catch (Exception ex)
         {

@@ -23,12 +23,15 @@ public class UsersController : ControllerBase
 
     /// <summary>
     /// Get paginated list of users (cached for 5 minutes)
+    /// P0-1: Restricted to Admin role only
     /// </summary>
     [HttpGet]
+    [Authorize(Policy = "Admin")] // P0-1: Require Admin role
     [Cached(300)] // Cache for 5 minutes (300 seconds)
     [ProducesResponseType(typeof(GetUsersDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetUsers(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 10,

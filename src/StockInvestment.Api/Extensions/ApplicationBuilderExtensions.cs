@@ -101,7 +101,8 @@ public static class ApplicationBuilderExtensions
     public static WebApplication MapEndpoints(this WebApplication app)
     {
         app.MapControllers();
-        // Map TradingHub to both paths for backward compatibility
+        // P2-1: Map TradingHub to both paths for backward compatibility
+        // StockPriceHub is removed as it's redundant (TradingHub provides same functionality)
         app.MapHub<TradingHub>("/hubs/stock-price");
         app.MapHub<TradingHub>("/hubs/trading");
         app.MapHub<WorkspaceHub>("/hubs/workspace");

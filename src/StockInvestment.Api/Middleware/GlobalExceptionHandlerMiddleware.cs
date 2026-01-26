@@ -105,6 +105,15 @@ public class GlobalExceptionHandlerMiddleware
                     TraceId = context.TraceIdentifier
                 }),
 
+            InvalidOperationException invalidOpEx when invalidOpEx.Message.Contains("unavailable", StringComparison.OrdinalIgnoreCase) || 
+                                                         invalidOpEx.Message.Contains("mock data", StringComparison.OrdinalIgnoreCase) => (
+                StatusCodes.Status503ServiceUnavailable, // P0-3: Return 503 for data unavailable when mock is disabled
+                new ErrorResponse
+                {
+                    Error = invalidOpEx.Message,
+                    TraceId = context.TraceIdentifier
+                }),
+
             InvalidOperationException invalidOpEx => (
                 StatusCodes.Status400BadRequest,
                 new ErrorResponse

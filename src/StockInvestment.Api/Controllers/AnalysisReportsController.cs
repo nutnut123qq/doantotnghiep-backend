@@ -1,34 +1,33 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using StockInvestment.Application.DTOs.AnalysisReports;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
-using StockInvestment.Infrastructure.Data;
 
 namespace StockInvestment.Api.Controllers;
 
 /// <summary>
 /// Controller for Analysis Reports module
 /// P0 Fix #7: [Authorize] for security, plural naming for REST convention
+/// P2-1: Uses IAnalysisReportService instead of DbContext directly
 /// </summary>
 [ApiController]
 [Route("api/analysis-reports")] // ✅ Plural for REST convention (P0 Fix #9)
 [Authorize] // ✅ Require authentication (P0 Fix #7)
 public class AnalysisReportsController : ControllerBase
 {
-    private readonly ApplicationDbContext _context;
+    private readonly IAnalysisReportService _reportService;
     private readonly IAnalysisReportQAService _qaService;
     private readonly IAIService _aiService;
     private readonly ILogger<AnalysisReportsController> _logger;
 
     public AnalysisReportsController(
-        ApplicationDbContext context,
+        IAnalysisReportService reportService,
         IAnalysisReportQAService qaService,
         IAIService aiService,
         ILogger<AnalysisReportsController> logger)
     {
-        _context = context;
+        _reportService = reportService;
         _qaService = qaService;
         _aiService = aiService;
         _logger = logger;
@@ -85,7 +84,8 @@ public class AnalysisReportsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetById(Guid id)
     {
-        var report = await _context.AnalysisReports.FindAsync(id);
+        // P2-1: Use service instead of DbContext
+        var report = await _reportService.GetReportByIdAsync(id);
 
         if (report == null)
             return NotFound($"Analysis report with ID {id} not found");
@@ -109,9 +109,14 @@ public class AnalysisReportsController : ControllerBase
 
     /// <summary>
     /// Create a new analysis report (V1: plain text only, NO crawler)
+    /// P0-1: Restricted to Admin/Analyst role to prevent data poisoning and reduce RAG ingestion costs
     /// </summary>
     [HttpPost]
-    // Optional: [Authorize(Roles = "Admin,Analyst")] // Restrict to specific roles
+    [Authorize(Policy = "AnalystOrAdmin")] // P0-1: Require Admin or Analyst role
+    [ProducesResponseType(typeof(AnalysisReportDetailDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Create([FromBody] CreateAnalysisReportDto dto)
     {
         // ✅ P0 Fix #11: CRITICAL - Validate input
@@ -135,8 +140,8 @@ public class AnalysisReportsController : ControllerBase
                 : dto.SourceUrl.Trim() // ✅ P0 Fix #6: Optional, no crawler fallback
         };
 
-        _context.AnalysisReports.Add(report);
-        await _context.SaveChangesAsync();
+        // P2-1: Use service instead of DbContext
+        await _reportService.CreateReportAsync(report);
 
         // RAG ingestion (do not fail report creation on ingest error)
         try
@@ -225,18 +230,4 @@ public class AnalysisReportsController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Helper method for safe string capping
-    /// P0 Fix #2, #3: Accept nullable string and safely cap to maxLength
-    /// </summary>
-    private static string Cap(string? text, int maxLength)
-    {
-        if (string.IsNullOrEmpty(text))
-            return string.Empty;
-
-        if (text.Length <= maxLength)
-            return text;
-
-        return text[..maxLength] + "…";
-    }
 }

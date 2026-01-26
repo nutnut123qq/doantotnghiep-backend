@@ -128,6 +128,13 @@ public class EventCrawlerService : IEventCrawlerService
 
         try
         {
+            // P1-1: Preload all tickers into a map to avoid N+1 queries
+            var allTickers = await _unitOfWork.Repository<StockTicker>().GetAllAsync();
+            var tickerMap = allTickers
+                .ToDictionary(t => t.Symbol.ToUpperInvariant(), t => t.Id, StringComparer.OrdinalIgnoreCase);
+            
+            _logger.LogDebug("Preloaded {Count} tickers for event parsing", tickerMap.Count);
+
             // VietStock event calendar URL (example - adjust based on actual API/site)
             var url = $"https://finance.vietstock.vn/lich-su-kien";
             
@@ -155,7 +162,7 @@ public class EventCrawlerService : IEventCrawlerService
             {
                 try
                 {
-                    var corporateEvent = await ParseVietStockEventRowAsync(row);
+                    var corporateEvent = await ParseVietStockEventRowAsync(row, tickerMap);
                     if (corporateEvent != null)
                     {
                         events.Add(corporateEvent);
@@ -232,7 +239,12 @@ public class EventCrawlerService : IEventCrawlerService
         return events;
     }
 
-    private async Task<CorporateEvent?> ParseVietStockEventRowAsync(HtmlNode row)
+    private Task<CorporateEvent?> ParseVietStockEventRowAsync(HtmlNode row, Dictionary<string, Guid> tickerMap)
+    {
+        return Task.FromResult(ParseVietStockEventRowAsyncSync(row, tickerMap));
+    }
+
+    private CorporateEvent? ParseVietStockEventRowAsyncSync(HtmlNode row, Dictionary<string, Guid> tickerMap)
     {
         try
         {
@@ -247,13 +259,12 @@ public class EventCrawlerService : IEventCrawlerService
                 return null;
             }
 
-            // Parse symbol
-            var symbol = cells[1].InnerText.Trim();
-            var tickers = await _unitOfWork.Repository<StockTicker>().GetAllAsync();
-            var ticker = tickers.FirstOrDefault(t => t.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase));
-
-            if (ticker == null)
+            // P1-1: Use preloaded ticker map instead of querying DB
+            var symbol = cells[1].InnerText.Trim().ToUpperInvariant();
+            if (!tickerMap.TryGetValue(symbol, out var tickerId))
+            {
                 return null;
+            }
 
             // Parse event type and details
             var eventTitle = cells[2].InnerText.Trim();
@@ -265,11 +276,11 @@ public class EventCrawlerService : IEventCrawlerService
             // Create appropriate event based on type
             CorporateEvent corporateEvent = eventType switch
             {
-                CorporateEventType.Earnings => CreateEarningsEventFromText(ticker.Id, eventDate, eventTitle, eventDetails),
-                CorporateEventType.Dividend => CreateDividendEventFromText(ticker.Id, eventDate, eventTitle, eventDetails),
-                CorporateEventType.StockSplit => CreateStockSplitEventFromText(ticker.Id, eventDate, eventTitle, eventDetails),
-                CorporateEventType.AGM => CreateAGMEventFromText(ticker.Id, eventDate, eventTitle, eventDetails),
-                CorporateEventType.RightsIssue => CreateRightsIssueEventFromText(ticker.Id, eventDate, eventTitle, eventDetails),
+                CorporateEventType.Earnings => CreateEarningsEventFromText(tickerId, eventDate, eventTitle, eventDetails),
+                CorporateEventType.Dividend => CreateDividendEventFromText(tickerId, eventDate, eventTitle, eventDetails),
+                CorporateEventType.StockSplit => CreateStockSplitEventFromText(tickerId, eventDate, eventTitle, eventDetails),
+                CorporateEventType.AGM => CreateAGMEventFromText(tickerId, eventDate, eventTitle, eventDetails),
+                CorporateEventType.RightsIssue => CreateRightsIssueEventFromText(tickerId, eventDate, eventTitle, eventDetails),
                 _ => null
             };
 

@@ -1,11 +1,9 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.DTOs.AIInsights;
 using StockInvestment.Domain.Enums;
-using StockInvestment.Infrastructure.Data;
 using System.Security.Claims;
 
 namespace StockInvestment.Api.Controllers;
@@ -166,8 +164,8 @@ public class AIInsightsController : ControllerBase
                 return BadRequest(new { error = "Symbol is required" });
             }
 
-            var ticker = await _context.StockTickers
-                .FirstOrDefaultAsync(t => t.Symbol == request.Symbol.ToUpper());
+            // P2-1: Use repository instead of DbContext
+            var ticker = await _tickerRepository.GetBySymbolAsync(request.Symbol.ToUpper());
 
             if (ticker == null)
             {

@@ -22,6 +22,7 @@ using Polly.Extensions.Http;
 using ICacheKeyGenerator = StockInvestment.Application.Interfaces.ICacheKeyGenerator;
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Net;
+using RabbitMQ.Client;
 
 namespace StockInvestment.Api.Extensions;
 
@@ -34,9 +35,10 @@ public static class ServiceCollectionExtensions
     {
         // P0-4: Configure ForwardedHeadersOptions for trusted proxies
         // This ensures X-Forwarded-For and X-Real-IP headers are only trusted from known proxies
+        // Note: X-Real-IP is handled as part of XForwardedFor in .NET
         services.Configure<ForwardedHeadersOptions>(options =>
         {
-            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XRealIp;
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
             
             // Clear default trusted proxies (security: don't trust all by default)
             options.KnownProxies.Clear();

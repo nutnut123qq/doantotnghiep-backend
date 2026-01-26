@@ -1,6 +1,5 @@
 using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using StockInvestment.Api.Hubs;
 using StockInvestment.Api.Middleware;
 using StockInvestment.Infrastructure.Hubs;
 using Serilog;

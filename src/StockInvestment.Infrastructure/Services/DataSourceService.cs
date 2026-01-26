@@ -119,19 +119,19 @@ public class DataSourceService : IDataSourceService
             while (redirectCount <= MaxRedirects)
             {
                 // Validate current URL before making request
-                var urlValidation = UrlGuard.ValidateUrl(currentUrl);
-                if (!urlValidation.IsValid)
+                var redirectUrlValidation = UrlGuard.ValidateUrl(currentUrl);
+                if (!redirectUrlValidation.IsValid)
                 {
                     _logger.LogWarning(
                         "SSRF protection blocked redirect URL for data source {Name} ({Id}) at step {Step}: {Reason}",
-                        dataSource.Name, dataSource.Id, redirectCount, urlValidation.ErrorMessage);
+                        dataSource.Name, dataSource.Id, redirectCount, redirectUrlValidation.ErrorMessage);
                     
                     dataSource.Status = ConnectionStatus.Error;
                     dataSource.LastChecked = DateTime.UtcNow;
-                    dataSource.ErrorMessage = $"Redirect validation failed at step {redirectCount}: {urlValidation.ErrorMessage}";
+                    dataSource.ErrorMessage = $"Redirect validation failed at step {redirectCount}: {redirectUrlValidation.ErrorMessage}";
                     await UpdateAsync(dataSource, cancellationToken);
                     
-                    throw new InvalidOperationException($"Invalid redirect URL: {urlValidation.ErrorMessage}");
+                    throw new InvalidOperationException($"Invalid redirect URL: {redirectUrlValidation.ErrorMessage}");
                 }
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, currentUrl);

@@ -47,7 +47,18 @@ public class RateLimitingMiddleware
         var limit = GetRateLimitForEndpoint(endpoint);
 
         // Use Redis for atomic increment with sliding window (60 seconds)
-        var count = await _cacheService.IncrementAsync(key, TimeSpan.FromMinutes(1));
+        long count;
+        try
+        {
+            count = await _cacheService.IncrementAsync(key, TimeSpan.FromMinutes(1));
+        }
+        catch (Exception ex)
+        {
+            // Fail-open: if Redis is unavailable, do not block requests
+            _logger.LogWarning(ex, "Rate limiting skipped due to cache error for {ClientIp} on {Endpoint}", clientIp, endpoint);
+            await _next(context);
+            return;
+        }
 
         if (count > limit)
         {

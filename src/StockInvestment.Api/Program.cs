@@ -21,6 +21,7 @@ builder.Services
     .AddRepositories()
     .AddBusinessServices()
     .AddHttpClients(builder.Configuration)
+    .AddMessagingServices(builder.Configuration)
     .AddBackgroundJobs()
     .AddHealthChecks(builder.Configuration)
     .AddMiddlewareOptions(builder.Configuration);

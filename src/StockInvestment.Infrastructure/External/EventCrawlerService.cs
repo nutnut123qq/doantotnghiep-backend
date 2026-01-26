@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using System.Globalization;
 using HtmlAgilityPack;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
@@ -16,16 +17,19 @@ public class EventCrawlerService : IEventCrawlerService
     private readonly ILogger<EventCrawlerService> _logger;
     private readonly HttpClient _httpClient;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly bool _enableCafeF;
 
     public EventCrawlerService(
         ILogger<EventCrawlerService> logger,
         IHttpClientFactory httpClientFactory,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IConfiguration configuration)
     {
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient("EventCrawler");
         _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         _unitOfWork = unitOfWork;
+        _enableCafeF = configuration.GetValue<bool>("EventCrawler:EnableCafeF");
     }
 
     public async Task<IEnumerable<CorporateEvent>> CrawlUpcomingEventsAsync(int daysAhead = 30)
@@ -37,11 +41,19 @@ public class EventCrawlerService : IEventCrawlerService
             _logger.LogInformation("Starting to crawl upcoming events for next {DaysAhead} days", daysAhead);
 
             // Crawl from multiple sources in parallel
-            var tasks = new[]
+            var tasks = new List<Task<IEnumerable<CorporateEvent>>>
             {
-                CrawlVietStockEventsAsync(daysAhead),
-                CrawlCafeFEventsAsync(daysAhead)
+                CrawlVietStockEventsAsync(daysAhead)
             };
+
+            if (_enableCafeF)
+            {
+                tasks.Add(CrawlCafeFEventsAsync(daysAhead));
+            }
+            else
+            {
+                _logger.LogInformation("CafeF event crawling is disabled by configuration");
+            }
 
             var results = await Task.WhenAll(tasks);
             

@@ -6,6 +6,8 @@ using StockInvestment.Application.Mappings;
 using StockInvestment.Infrastructure.Data;
 using StockInvestment.Infrastructure.Data.Repositories;
 using StockInvestment.Infrastructure.External;
+using StockInvestment.Infrastructure.Messaging;
+using StockInvestment.Infrastructure.Messaging.MessageHandlers;
 using StockInvestment.Infrastructure.Services;
 using StackExchange.Redis;
 using System.Text;
@@ -400,6 +402,13 @@ public static class ServiceCollectionExtensions
                 client.Timeout = TimeSpan.FromSeconds(5);
             });
 
+        // Configure HTTP Client for Event Crawler
+        services.AddHttpClient("EventCrawler", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+        });
+
         // P0-2 SSRF: Dedicated HttpClient for DataSource TestConnection with enforced redirect limit and no retries
         services.AddHttpClient("DataSourceTestConnection", client =>
         {
@@ -422,6 +431,40 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient("Telegram"),
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Infrastructure.Configuration.NotificationChannelOptions>>(),
                 sp.GetRequiredService<ILogger<Infrastructure.Services.NotificationChannels.TelegramNotificationSender>>()));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Add messaging services (RabbitMQ consumers)
+    /// </summary>
+    public static IServiceCollection AddMessagingServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        var enabled = configuration.GetValue<bool>("RabbitMQ:Enabled");
+        if (!enabled)
+        {
+            return services;
+        }
+
+        var connectionString = configuration.GetConnectionString("RabbitMQ");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException("RabbitMQ is enabled but ConnectionStrings:RabbitMQ is not configured.");
+        }
+
+        services.AddSingleton<RabbitMQService>(sp =>
+            new RabbitMQService(
+                sp.GetRequiredService<ILogger<RabbitMQService>>(),
+                connectionString));
+
+        services.AddSingleton<NewsSummarizeHandler>(sp =>
+            new NewsSummarizeHandler(
+                sp.GetRequiredService<RabbitMQService>().Channel,
+                sp.GetRequiredService<IAIService>(),
+                sp.GetRequiredService<INewsService>(),
+                sp.GetRequiredService<ILogger<NewsSummarizeHandler>>()));
+
+        services.AddHostedService<NewsSummarizeConsumerService>();
 
         return services;
     }

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using System;
 using System.Security.Claims;
 using StockInvestment.Domain.Enums;
 
@@ -30,8 +31,17 @@ public class AdminOnlyAttribute : Attribute, IAuthorizationFilter
             return;
         }
 
-        // Check if user is Admin
-        if (!Enum.TryParse<UserRole>(roleClaim, out var userRole) || userRole != UserRole.Admin)
+        var role = roleClaim.Trim();
+
+        // Allow Admin or SuperAdmin (string-based for forward compatibility)
+        if (role.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
+            role.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        // Fallback: parse enum for legacy tokens
+        if (!Enum.TryParse<UserRole>(role, true, out var userRole) || userRole != UserRole.Admin)
         {
             context.Result = new ForbidResult();
             return;

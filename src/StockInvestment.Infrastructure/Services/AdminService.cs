@@ -4,6 +4,7 @@ using StockInvestment.Application.Features.Admin.Models;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Domain.Enums;
+using StockInvestment.Infrastructure.Data;
 
 namespace StockInvestment.Infrastructure.Services;
 
@@ -14,23 +15,28 @@ public class AdminService : IAdminService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
+    private readonly ApplicationDbContext _dbContext;
 
-    public AdminService(IUnitOfWork unitOfWork, IPasswordHasher passwordHasher)
+    public AdminService(
+        IUnitOfWork unitOfWork,
+        IPasswordHasher passwordHasher,
+        ApplicationDbContext dbContext)
     {
         _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
+        _dbContext = dbContext;
     }
 
     public async Task<(IEnumerable<User> Users, int TotalCount)> GetAllUsersAsync(int page = 1, int pageSize = 20)
     {
-        var users = await _unitOfWork.Users.GetAllAsync();
-        var totalCount = users.Count();
-        
-        var pagedUsers = users
+        var query = _dbContext.Users.AsNoTracking();
+        var totalCount = await query.CountAsync();
+
+        var pagedUsers = await query
             .OrderByDescending(u => u.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ToList();
+            .ToListAsync();
 
         return (pagedUsers, totalCount);
     }

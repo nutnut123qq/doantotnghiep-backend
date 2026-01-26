@@ -5,6 +5,7 @@ using StockInvestment.Application.Contracts.AI;
 using StockInvestment.Application.DTOs.AnalysisReports;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Infrastructure.Data;
+using System.Text;
 using System.Text.Json;
 
 namespace StockInvestment.Infrastructure.Services;
@@ -142,14 +143,50 @@ public class FinancialReportService : IFinancialReportService
             throw new Domain.Exceptions.NotFoundException("FinancialReport", reportId);
         }
 
-        var context = $"Financial Report - {report.ReportType} {report.Year}";
-        if (report.Quarter.HasValue)
-        {
-            context += $" Q{report.Quarter}";
-        }
-        context += $"\n\nData:\n{report.Content}";
+        var symbol = await _context.StockTickers
+            .Where(t => t.Id == report.TickerId)
+            .Select(t => t.Symbol)
+            .FirstOrDefaultAsync();
 
-        var result = await _aiService.AnswerQuestionAsync(question, context);
+        var contextBuilder = new StringBuilder();
+        contextBuilder.AppendLine("FINANCIAL REPORT CONTEXT");
+        contextBuilder.AppendLine($"Report: {report.ReportType} {report.Year}{(report.Quarter.HasValue ? $" Q{report.Quarter}" : string.Empty)}");
+        contextBuilder.AppendLine($"ReportDate: {report.ReportDate:yyyy-MM-dd}");
+        contextBuilder.AppendLine($"Symbol: {symbol ?? "N/A"}");
+        contextBuilder.AppendLine();
+        contextBuilder.AppendLine("CONTENT:");
+        contextBuilder.AppendLine(Cap(report.Content, 12000));
+
+        var baseContext = contextBuilder.ToString().Trim();
+
+        // Ingest document for RAG (best-effort)
+        try
+        {
+            await _aiService.IngestDocumentAsync(
+                documentId: report.Id.ToString(),
+                source: "financial_report",
+                text: report.Content,
+                metadata: new
+                {
+                    symbol,
+                    reportType = report.ReportType,
+                    year = report.Year,
+                    quarter = report.Quarter,
+                    reportDate = report.ReportDate
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to ingest financial report {ReportId} for RAG", report.Id);
+        }
+
+        var result = await _aiService.AnswerQuestionAsync(
+            question: question,
+            baseContext: baseContext,
+            documentId: report.Id.ToString(),
+            source: "financial_report",
+            symbol: symbol,
+            topK: 6);
         
         _logger.LogInformation("Answered question for report {ReportId}", reportId);
         return result;

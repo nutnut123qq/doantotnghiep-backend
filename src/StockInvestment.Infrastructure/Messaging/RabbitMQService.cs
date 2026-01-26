@@ -11,6 +11,8 @@ public class RabbitMQService : IDisposable
     private readonly IModel _channel;
     private readonly ILogger<RabbitMQService> _logger;
 
+    public IModel Channel => _channel;
+
     public RabbitMQService(ILogger<RabbitMQService> logger, string connectionString)
     {
         _logger = logger;

@@ -9,17 +9,18 @@ namespace StockInvestment.Infrastructure.Services;
 
 /// <summary>
 /// P2-1: Service implementation for Analysis Reports
+/// Uses ApplicationDbContext for efficient queries (AsNoTracking) but abstracts it from controllers
 /// </summary>
 public class AnalysisReportService : IAnalysisReportService
 {
-    private readonly IUnitOfWork _unitOfWork;
+    private readonly ApplicationDbContext _context;
     private readonly ILogger<AnalysisReportService> _logger;
 
     public AnalysisReportService(
-        IUnitOfWork unitOfWork,
+        ApplicationDbContext context,
         ILogger<AnalysisReportService> logger)
     {
-        _unitOfWork = unitOfWork;
+        _context = context;
         _logger = logger;
     }
 
@@ -29,41 +30,45 @@ public class AnalysisReportService : IAnalysisReportService
         int pageSize,
         CancellationToken cancellationToken = default)
     {
-        var repository = _unitOfWork.Repository<AnalysisReport>();
-        
-        var query = repository.FindAsync(r => r.Symbol == symbol, cancellationToken);
-        var allReports = await query;
-        var reportsList = allReports.OrderByDescending(r => r.PublishedAt).ToList();
+        // P2-1: Use DbContext with AsNoTracking for efficient read-only pagination
+        var query = _context.AnalysisReports
+            .AsNoTracking()
+            .Where(r => r.Symbol == symbol)
+            .OrderByDescending(r => r.PublishedAt);
 
-        var total = reportsList.Count;
-        var items = reportsList
+        var total = await query.CountAsync(cancellationToken);
+        var reports = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(r => new AnalysisReportListDto
-            {
-                Id = r.Id,
-                Symbol = r.Symbol,
-                Title = r.Title,
-                FirmName = r.FirmName,
-                PublishedAt = r.PublishedAt,
-                Recommendation = r.Recommendation,
-                TargetPrice = r.TargetPrice,
-                SourceUrl = r.SourceUrl,
-                ContentPreview = Cap(r.Content, 200)
-            }).ToList();
+            .ToListAsync(cancellationToken);
+
+        var items = reports.Select(r => new AnalysisReportListDto
+        {
+            Id = r.Id,
+            Symbol = r.Symbol,
+            Title = r.Title,
+            FirmName = r.FirmName,
+            PublishedAt = r.PublishedAt,
+            Recommendation = r.Recommendation,
+            TargetPrice = r.TargetPrice,
+            SourceUrl = r.SourceUrl,
+            ContentPreview = Cap(r.Content, 200)
+        }).ToList();
 
         return (items, total);
     }
 
     public async Task<AnalysisReport?> GetReportByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        return await _unitOfWork.Repository<AnalysisReport>().GetByIdAsync(id, cancellationToken);
+        return await _context.AnalysisReports
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
     }
 
     public async Task<AnalysisReport> CreateReportAsync(AnalysisReport report, CancellationToken cancellationToken = default)
     {
-        await _unitOfWork.Repository<AnalysisReport>().AddAsync(report, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _context.AnalysisReports.Add(report);
+        await _context.SaveChangesAsync(cancellationToken);
         return report;
     }
 

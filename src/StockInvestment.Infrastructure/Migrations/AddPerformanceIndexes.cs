@@ -39,11 +39,15 @@ namespace StockInvestment.Infrastructure.Migrations
                 columns: new[] { "TickerId", "IsActive" });
 
             // Indexes for News table
-            migrationBuilder.CreateIndex(
-                name: "IX_News_PublishedDate",
-                table: "News",
-                column: "PublishedDate",
-                descending: new bool[] { true });
+            // ⚠️ WARNING: This migration uses "PublishedDate" which is INCORRECT
+            // The actual column name is "PublishedAt" (see News.cs entity)
+            // This migration should NOT be applied - use 20260126000000_AddNewsIndexes.cs instead
+            // Keeping this for reference only - DO NOT RUN
+            // migrationBuilder.CreateIndex(
+            //     name: "IX_News_PublishedDate",
+            //     table: "News",
+            //     column: "PublishedDate",
+            //     descending: new bool[] { true });
 
             migrationBuilder.CreateIndex(
                 name: "IX_News_Source",

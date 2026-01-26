@@ -16,20 +16,20 @@ public class AIInsightsController : ControllerBase
     private readonly IAIInsightService _insightService;
     private readonly ILogger<AIInsightsController> _logger;
     private readonly ICacheService _cacheService;
-    private readonly ApplicationDbContext _context;
+    private readonly IStockTickerRepository _tickerRepository;
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
 
     public AIInsightsController(
         IAIInsightService insightService,
         ILogger<AIInsightsController> logger,
         ICacheService cacheService,
-        ApplicationDbContext context,
+        IStockTickerRepository tickerRepository,
         ICacheKeyGenerator cacheKeyGenerator)
     {
         _insightService = insightService;
         _logger = logger;
         _cacheService = cacheService;
-        _context = context;
+        _tickerRepository = tickerRepository;
         _cacheKeyGenerator = cacheKeyGenerator;
     }
 

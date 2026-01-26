@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -8,19 +9,23 @@ namespace StockInvestment.Infrastructure.BackgroundJobs;
 
 /// <summary>
 /// Background job to crawl news periodically from Vietnamese financial news sources
+/// P1-2: Uses distributed lock to prevent duplicate execution across instances
 /// </summary>
 public class NewsCrawlerJob : BackgroundService
 {
     private readonly ILogger<NewsCrawlerJob> _logger;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IConfiguration _configuration;
     private readonly TimeSpan _crawlInterval = TimeSpan.FromMinutes(30); // Crawl every 30 minutes
 
     public NewsCrawlerJob(
         ILogger<NewsCrawlerJob> logger,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IConfiguration configuration)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
+        _configuration = configuration;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -50,11 +55,20 @@ public class NewsCrawlerJob : BackgroundService
     private async Task CrawlNewsAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceProvider.CreateScope();
-        var newsCrawlerService = scope.ServiceProvider.GetRequiredService<INewsCrawlerService>();
-        var newsService = scope.ServiceProvider.GetRequiredService<INewsService>();
+        
+        // P1-2: Acquire distributed lock
+        var distributedLock = await JobLockHelper.TryAcquireLockAsync(
+            scope, _configuration, _logger, "news-crawler", TimeSpan.FromHours(1), cancellationToken);
+        
+        if (distributedLock == null)
+        {
+            return; // Lock not acquired or disabled
+        }
 
         try
         {
+            var newsCrawlerService = scope.ServiceProvider.GetRequiredService<INewsCrawlerService>();
+            var newsService = scope.ServiceProvider.GetRequiredService<INewsService>();
             _logger.LogInformation("Starting news crawl...");
 
             // Crawl news from all sources
@@ -109,6 +123,15 @@ public class NewsCrawlerJob : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in CrawlNewsAsync");
+        }
+        finally
+        {
+            // P1-2: Release distributed lock
+            if (distributedLock != null)
+            {
+                await distributedLock.ReleaseAsync();
+                distributedLock.Dispose();
+            }
         }
     }
 }

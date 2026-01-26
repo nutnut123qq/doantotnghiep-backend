@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -9,19 +10,23 @@ namespace StockInvestment.Infrastructure.BackgroundJobs;
 
 /// <summary>
 /// Background job to calculate technical indicators periodically
+/// P1-2: Uses distributed lock to prevent duplicate execution across instances
 /// </summary>
 public class TechnicalIndicatorCalculationJob : BackgroundService
 {
     private readonly ILogger<TechnicalIndicatorCalculationJob> _logger;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IConfiguration _configuration;
     private readonly TimeSpan _calculationInterval = TimeSpan.FromHours(1); // Tính toán mỗi 1 giờ
 
     public TechnicalIndicatorCalculationJob(
         ILogger<TechnicalIndicatorCalculationJob> logger,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IConfiguration configuration)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
+        _configuration = configuration;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -51,11 +56,20 @@ public class TechnicalIndicatorCalculationJob : BackgroundService
     private async Task CalculateIndicatorsAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceProvider.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var indicatorService = scope.ServiceProvider.GetRequiredService<ITechnicalIndicatorService>();
+        
+        // P1-2: Acquire distributed lock
+        var distributedLock = await JobLockHelper.TryAcquireLockAsync(
+            scope, _configuration, _logger, "technical-indicator-calculation", TimeSpan.FromHours(2), cancellationToken);
+        
+        if (distributedLock == null)
+        {
+            return; // Lock not acquired or disabled
+        }
 
         try
         {
+            var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var indicatorService = scope.ServiceProvider.GetRequiredService<ITechnicalIndicatorService>();
             var symbols = await GetSymbolsToProcessAsync(dbContext, cancellationToken);
             _logger.LogInformation("Calculating indicators for {Count} symbols", symbols.Count);
 
@@ -79,6 +93,15 @@ public class TechnicalIndicatorCalculationJob : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in CalculateIndicatorsAsync");
+        }
+        finally
+        {
+            // P1-2: Release distributed lock
+            if (distributedLock != null)
+            {
+                await distributedLock.ReleaseAsync();
+                distributedLock.Dispose();
+            }
         }
     }
 

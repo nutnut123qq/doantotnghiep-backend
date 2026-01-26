@@ -51,29 +51,8 @@ public class AnalysisReportsController : ControllerBase
         if (page < 1) page = 1;
         if (pageSize < 1 || pageSize > 100) pageSize = 10;
 
-        var query = _context.AnalysisReports
-            .AsNoTracking() // ✅ Better performance for read-only queries
-            .Where(r => r.Symbol == symbol) // Already normalized in DB
-            .OrderByDescending(r => r.PublishedAt);
-
-        var total = await query.CountAsync();
-        var reports = await query
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync();
-
-        var items = reports.Select(r => new AnalysisReportListDto
-        {
-            Id = r.Id,
-            Symbol = r.Symbol,
-            Title = r.Title,
-            FirmName = r.FirmName,
-            PublishedAt = r.PublishedAt,
-            Recommendation = r.Recommendation,
-            TargetPrice = r.TargetPrice,
-            SourceUrl = r.SourceUrl,
-            ContentPreview = Cap(r.Content, 200) // ✅ SAFE (P0 Fix #3)
-        }).ToList();
+        // P2-1: Use service instead of DbContext
+        var (items, total) = await _reportService.GetReportsBySymbolAsync(symbol, page, pageSize);
 
         return Ok(new { items, total, page, pageSize });
     }

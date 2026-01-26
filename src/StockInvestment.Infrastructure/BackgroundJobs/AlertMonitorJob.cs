@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -12,19 +13,23 @@ namespace StockInvestment.Infrastructure.BackgroundJobs;
 
 /// <summary>
 /// Background job to monitor and trigger alerts
+/// P1-2: Uses distributed lock to prevent duplicate execution across instances
 /// </summary>
 public class AlertMonitorJob : BackgroundService
 {
     private readonly ILogger<AlertMonitorJob> _logger;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IConfiguration _configuration;
     private readonly TimeSpan _checkInterval = TimeSpan.FromMinutes(1);
 
     public AlertMonitorJob(
         ILogger<AlertMonitorJob> logger,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IConfiguration configuration)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
+        _configuration = configuration;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -51,10 +56,19 @@ public class AlertMonitorJob : BackgroundService
     private async Task CheckAlertsAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceProvider.CreateScope();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<StockInvestment.Application.Interfaces.IUnitOfWork>();
+        
+        // P1-2: Acquire distributed lock
+        var distributedLock = await JobLockHelper.TryAcquireLockAsync(
+            scope, _configuration, _logger, "alert-monitor", TimeSpan.FromMinutes(5), cancellationToken);
+        
+        if (distributedLock == null)
+        {
+            return; // Lock not acquired or disabled
+        }
 
         try
         {
+            var unitOfWork = scope.ServiceProvider.GetRequiredService<StockInvestment.Application.Interfaces.IUnitOfWork>();
             var activeAlerts = await unitOfWork.Alerts.GetActiveAlertsWithTickerAndUserAsync(cancellationToken);
 
             _logger.LogInformation("Checking {Count} active alerts", activeAlerts.Count());
@@ -109,6 +123,15 @@ public class AlertMonitorJob : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in CheckAlertsAsync");
+        }
+        finally
+        {
+            // P1-2: Release distributed lock
+            if (distributedLock != null)
+            {
+                await distributedLock.ReleaseAsync();
+                distributedLock.Dispose();
+            }
         }
     }
 

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -9,19 +10,23 @@ namespace StockInvestment.Infrastructure.BackgroundJobs;
 
 /// <summary>
 /// Background job to update stock prices periodically
+/// P1-2: Uses distributed lock to prevent duplicate execution across instances
 /// </summary>
 public class StockPriceUpdateJob : BackgroundService
 {
     private readonly ILogger<StockPriceUpdateJob> _logger;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IConfiguration _configuration;
     private readonly TimeSpan _updateInterval = TimeSpan.FromMinutes(1); // Cập nhật mỗi 1 phút
 
     public StockPriceUpdateJob(
         ILogger<StockPriceUpdateJob> logger,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IConfiguration configuration)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
+        _configuration = configuration;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -48,12 +53,21 @@ public class StockPriceUpdateJob : BackgroundService
     private async Task UpdateStockPricesAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceProvider.CreateScope();
-        var vnStockService = scope.ServiceProvider.GetRequiredService<IVNStockService>();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<StockInvestment.Application.Interfaces.IUnitOfWork>();
-        var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<TradingHub>>();
+        
+        // P1-2: Acquire distributed lock
+        var distributedLock = await JobLockHelper.TryAcquireLockAsync(
+            scope, _configuration, _logger, "stock-price-update", TimeSpan.FromMinutes(5), cancellationToken);
+        
+        if (distributedLock == null)
+        {
+            return; // Lock not acquired or disabled
+        }
 
         try
         {
+            var vnStockService = scope.ServiceProvider.GetRequiredService<IVNStockService>();
+            var unitOfWork = scope.ServiceProvider.GetRequiredService<StockInvestment.Application.Interfaces.IUnitOfWork>();
+            var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<TradingHub>>();
             // Lấy danh sách VN30 để cập nhật
             var vn30Symbols = new[]
             {
@@ -111,6 +125,15 @@ public class StockPriceUpdateJob : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in UpdateStockPricesAsync");
+        }
+        finally
+        {
+            // P1-2: Release distributed lock
+            if (distributedLock != null)
+            {
+                await distributedLock.ReleaseAsync();
+                distributedLock.Dispose();
+            }
         }
     }
 }

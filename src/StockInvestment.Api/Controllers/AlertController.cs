@@ -3,8 +3,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Features.Alerts.CreateAlert;
 using StockInvestment.Application.Features.Alerts.GetAlerts;
+using StockInvestment.Application.Features.Alerts.UpdateAlert;
+using StockInvestment.Application.Features.Alerts.DeleteAlert;
+using StockInvestment.Application.Features.Alerts.ToggleAlert;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Enums;
+using StockInvestment.Domain.Exceptions;
 using System.Security.Claims;
 
 namespace StockInvestment.Api.Controllers;
@@ -105,6 +109,126 @@ public class AlertController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Update an alert
+    /// </summary>
+    [HttpPut("{id}")]
+    public async Task<IActionResult> UpdateAlert(Guid id, [FromBody] UpdateAlertRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        var command = new UpdateAlertCommand
+        {
+            AlertId = id,
+            UserId = userId,
+            Symbol = request.Symbol,
+            Type = request.Type,
+            Condition = request.Condition,
+            Threshold = request.Threshold,
+            Timeframe = request.Timeframe
+        };
+
+        try
+        {
+            var result = await _mediator.Send(command);
+            return Ok(result);
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating alert {AlertId}", id);
+            return BadRequest(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Delete an alert
+    /// </summary>
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> DeleteAlert(Guid id)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        var command = new DeleteAlertCommand
+        {
+            AlertId = id,
+            UserId = userId
+        };
+
+        try
+        {
+            var result = await _mediator.Send(command);
+            return Ok(result);
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting alert {AlertId}", id);
+            return BadRequest(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Toggle alert active status
+    /// </summary>
+    [HttpPatch("{id}")]
+    public async Task<IActionResult> ToggleAlert(Guid id, [FromBody] ToggleAlertRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        var command = new ToggleAlertCommand
+        {
+            AlertId = id,
+            UserId = userId,
+            IsActive = request.IsActive
+        };
+
+        try
+        {
+            var result = await _mediator.Send(command);
+            return Ok(result);
+        }
+        catch (NotFoundException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Forbid(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error toggling alert {AlertId}", id);
+            return BadRequest(ex.Message);
+        }
+    }
+
     private Guid GetCurrentUserId()
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -125,5 +249,19 @@ public class CreateAlertRequest
     public string? Condition { get; set; }
     public decimal? Threshold { get; set; }
     public string? Timeframe { get; set; }
+}
+
+public class UpdateAlertRequest
+{
+    public string? Symbol { get; set; }
+    public AlertType? Type { get; set; }
+    public string? Condition { get; set; }
+    public decimal? Threshold { get; set; }
+    public string? Timeframe { get; set; }
+}
+
+public class ToggleAlertRequest
+{
+    public bool IsActive { get; set; }
 }
 

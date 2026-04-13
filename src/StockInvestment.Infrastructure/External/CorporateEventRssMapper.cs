@@ -11,6 +11,7 @@ public static class CorporateEventRssMapper
     public static CorporateEvent? TryMapItem(
         SyndicationItem item,
         IReadOnlyDictionary<string, Guid> tickerMap,
+        IReadOnlyDictionary<string, Guid>? tickerNameAliasMap,
         string feedDisplayName)
     {
         var link = RssSyndicationUtilities.GetItemLink(item);
@@ -24,7 +25,7 @@ public static class CorporateEventRssMapper
         var summary = RssSyndicationUtilities.GetSummaryText(item);
         var combined = $"{title}\n{summary}";
 
-        if (!CorporateEventTextHelper.TryResolveTickerId(combined, tickerMap, out var tickerId))
+        if (!CorporateEventTextHelper.TryResolveTickerId(combined, tickerMap, tickerNameAliasMap, out var tickerId))
             return null;
 
         var published = RssSyndicationUtilities.ResolvePublishedAtUtc(item);

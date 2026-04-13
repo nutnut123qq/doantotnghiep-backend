@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Contracts.AI;
 using StockInvestment.Application.DTOs.AnalysisReports;
@@ -9,6 +10,8 @@ namespace StockInvestment.Infrastructure.External;
 
 public partial class AIServiceClient
 {
+    private const int QaRequestTimeoutSeconds = 90;
+
     public async Task<QuestionAnswerResult> AnswerQuestionAsync(
         string question,
         string baseContext,
@@ -31,7 +34,31 @@ public partial class AIServiceClient
         };
 
         const string endpoint = "/api/qa";
-        var response = await _httpClient.PostAsJsonAsync(endpoint, requestBody, cancellationToken);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(QaRequestTimeoutSeconds));
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.PostAsJsonAsync(endpoint, requestBody, timeoutCts.Token);
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "AI QA request timed out after {TimeoutSeconds}s for {Symbol}", QaRequestTimeoutSeconds, symbol);
+            throw new Domain.Exceptions.ExternalServiceException(
+                "AI Service",
+                "AI service đang bận hoặc không phản hồi kịp thời. Vui lòng thử lại sau.",
+                StatusCodes.Status504GatewayTimeout);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "AI QA request failed for {Symbol}", symbol);
+            throw new Domain.Exceptions.ExternalServiceException(
+                "AI Service",
+                "Không thể kết nối AI service. Vui lòng kiểm tra dịch vụ AI và thử lại.",
+                ex);
+        }
+
         if (!response.IsSuccessStatusCode)
         {
             await HandleHttpErrorAsync(response, endpoint, symbol);

@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using System.Globalization;
+using System.Text;
 using StockInvestment.Domain.Entities;
 
 namespace StockInvestment.Infrastructure.External;
@@ -45,6 +47,16 @@ public static class CorporateEventTextHelper
     /// Resolves the first stock symbol in <paramref name="text"/> that exists in <paramref name="tickerMap"/>.
     /// </summary>
     public static bool TryResolveTickerId(string text, IReadOnlyDictionary<string, Guid> tickerMap, out Guid tickerId)
+        => TryResolveTickerId(text, tickerMap, null, out tickerId);
+
+    /// <summary>
+    /// Resolves ticker by symbol first, then by company-name aliases.
+    /// </summary>
+    public static bool TryResolveTickerId(
+        string text,
+        IReadOnlyDictionary<string, Guid> tickerMap,
+        IReadOnlyDictionary<string, Guid>? tickerNameAliasMap,
+        out Guid tickerId)
     {
         tickerId = default;
         if (string.IsNullOrWhiteSpace(text) || tickerMap.Count == 0)
@@ -58,7 +70,41 @@ public static class CorporateEventTextHelper
                 return true;
         }
 
+        if (tickerNameAliasMap is not { Count: > 0 })
+            return false;
+
+        var normalizedText = NormalizeForAliasMatch(text);
+        foreach (var alias in tickerNameAliasMap)
+        {
+            if (normalizedText.Contains(alias.Key, StringComparison.Ordinal))
+            {
+                tickerId = alias.Value;
+                return true;
+            }
+        }
+
         return false;
+    }
+
+    private static string NormalizeForAliasMatch(string text)
+    {
+        var lower = RemoveDiacritics(text).ToLowerInvariant();
+        var compact = Regex.Replace(lower, @"[\p{P}\p{S}\s]+", " ").Trim();
+        return compact;
+    }
+
+    private static string RemoveDiacritics(string text)
+    {
+        var normalized = text.Normalize(NormalizationForm.FormD);
+        var sb = new System.Text.StringBuilder(normalized.Length);
+        foreach (var ch in normalized)
+        {
+            var unicodeCategory = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (unicodeCategory != UnicodeCategory.NonSpacingMark)
+                sb.Append(ch);
+        }
+
+        return sb.ToString().Normalize(NormalizationForm.FormC);
     }
 
     public static CorporateEvent CreateEventFromRss(

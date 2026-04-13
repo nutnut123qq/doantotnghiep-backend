@@ -1,11 +1,15 @@
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Features.Auth.Login;
+using StockInvestment.Application.Features.Auth.ChangePassword;
 using StockInvestment.Application.Features.Auth.Register;
 using StockInvestment.Application.Features.Auth.VerifyEmail;
 using StockInvestment.Application.Features.Auth.ResendVerification;
 using StockInvestment.Api.Middleware;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Exceptions;
+using System.Security.Claims;
 
 namespace StockInvestment.Api.Controllers;
 
@@ -113,6 +117,27 @@ public class AuthController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationCommand command)
     {
+        var result = await _mediator.Send(command);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Change password for current authenticated user
+    /// </summary>
+    [Authorize]
+    [HttpPost("change-password")]
+    [ProducesResponseType(typeof(ChangePasswordDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordCommand command)
+    {
+        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdClaim, out var userId))
+        {
+            throw new UnauthorizedException("Invalid user context");
+        }
+
+        command.UserId = userId;
         var result = await _mediator.Send(command);
         return Ok(result);
     }

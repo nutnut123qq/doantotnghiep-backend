@@ -1,7 +1,9 @@
 using HtmlAgilityPack;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
+using StockInvestment.Infrastructure.Configuration;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -22,40 +24,174 @@ public class FinancialReportCrawlerService : IFinancialReportCrawlerService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<FinancialReportCrawlerService> _logger;
     private readonly HttpClient _httpClient;
+    private readonly FinancialIngestionOptions _options;
 
     public FinancialReportCrawlerService(
         IHttpClientFactory httpClientFactory,
-        ILogger<FinancialReportCrawlerService> logger)
+        ILogger<FinancialReportCrawlerService> logger,
+        IOptions<FinancialIngestionOptions> options)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient("FinancialReportCrawler");
+        _options = options.Value;
     }
 
     public async Task<IEnumerable<FinancialReport>> CrawlReportsBySymbolAsync(string symbol, int maxReports = 10)
     {
         var reports = new List<FinancialReport>();
+        var sources = ResolveFinancialSources();
 
         try
         {
-            var primary = await CrawlFromVietCapAsync(symbol, maxReports);
-            reports.AddRange(primary);
-
-            if (reports.Count == 0)
+            foreach (var source in sources)
             {
-                var half = Math.Max(1, maxReports / 2);
-                reports.AddRange(await CrawlFromVietStockAsync(symbol, half));
-                reports.AddRange(await CrawlFromCafeFAsync(symbol, half));
+                var sourceItems = await CrawlSourceWithFallbackAsync(
+                    source,
+                    symbol,
+                    maxReports,
+                    _options.MinReportsBeforeFallback);
+
+                reports.AddRange(sourceItems);
             }
 
-            _logger.LogInformation("Crawled {Count} financial reports for {Symbol}", reports.Count, symbol);
+            reports = DeduplicateReports(reports)
+                .Take(maxReports)
+                .ToList();
+
+            _logger.LogInformation("Crawled {Count} financial reports for {Symbol} from {SourceCount} configured sources", reports.Count, symbol, sources.Count);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error crawling financial reports for {Symbol}", symbol);
         }
 
-        return reports.Take(maxReports);
+        return reports;
+    }
+
+    private List<NewsSourceConfig> ResolveFinancialSources()
+    {
+        var configured = _options.Sources
+            .Where(s => s.Enabled && !string.IsNullOrWhiteSpace(s.Name))
+            .OrderBy(s => s.Priority)
+            .ToList();
+
+        if (configured.Count > 0)
+        {
+            return configured;
+        }
+
+        return
+        [
+            new NewsSourceConfig
+            {
+                Name = "VietCap-GraphQL",
+                Kind = "GraphQlPrimary",
+                Priority = 10,
+                MaxItems = _options.MaxReportsPerSymbol,
+                MinItemsBeforeFallback = _options.MinReportsBeforeFallback,
+                FallbackSources =
+                [
+                    new NewsSourceConfig { Name = "VietStock-HTML", Kind = "HtmlBuiltin", HtmlTemplate = "VietStock", Priority = 20, MaxItems = 5 },
+                    new NewsSourceConfig { Name = "CafeF-HTML", Kind = "HtmlBuiltin", HtmlTemplate = "CafeF", Priority = 30, MaxItems = 5 }
+                ]
+            }
+        ];
+    }
+
+    private async Task<IReadOnlyList<FinancialReport>> CrawlSourceWithFallbackAsync(
+        NewsSourceConfig source,
+        string symbol,
+        int maxReports,
+        int pipelineMinBeforeFallback,
+        HashSet<string>? visited = null)
+    {
+        visited ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var key = $"{source.Name}|{source.Kind}|{source.Url}|{source.HtmlTemplate}";
+        if (!visited.Add(key))
+        {
+            _logger.LogWarning("Detected recursive financial fallback config for source {SourceName}.", source.Name);
+            return Array.Empty<FinancialReport>();
+        }
+
+        var sourceMax = Math.Min(maxReports, source.MaxItems ?? maxReports);
+        var fetched = (await CrawlSingleFinancialSourceAsync(source, symbol, sourceMax)).ToList();
+        var threshold = Math.Max(0, source.MinItemsBeforeFallback ?? pipelineMinBeforeFallback);
+
+        _logger.LogInformation(
+            "Financial source {SourceName} fetched={FetchedCount} threshold={Threshold} fallbackCandidates={FallbackCount}",
+            source.Name,
+            fetched.Count,
+            threshold,
+            source.FallbackSources.Count);
+
+        if (fetched.Count >= threshold || source.FallbackSources.Count == 0)
+        {
+            return fetched;
+        }
+
+        var aggregate = new List<FinancialReport>(fetched);
+        foreach (var fallback in source.FallbackSources.Where(s => s.Enabled).OrderBy(s => s.Priority))
+        {
+            var nestedVisited = new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase);
+            var fallbackItems = await CrawlSourceWithFallbackAsync(
+                fallback,
+                symbol,
+                sourceMax,
+                pipelineMinBeforeFallback,
+                nestedVisited);
+            aggregate.AddRange(fallbackItems);
+
+            if (aggregate.Count >= threshold)
+            {
+                break;
+            }
+        }
+
+        return DeduplicateReports(aggregate).Take(sourceMax).ToList();
+    }
+
+    private async Task<IEnumerable<FinancialReport>> CrawlSingleFinancialSourceAsync(
+        NewsSourceConfig source,
+        string symbol,
+        int maxReports)
+    {
+        var kind = source.Kind.Trim();
+        if (kind.Equals("GraphQlPrimary", StringComparison.OrdinalIgnoreCase)
+            || kind.Equals("VietCap", StringComparison.OrdinalIgnoreCase))
+        {
+            return await CrawlFromVietCapAsync(symbol, maxReports);
+        }
+
+        if (kind.Equals("HtmlBuiltin", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(source.HtmlTemplate, "VietStock", StringComparison.OrdinalIgnoreCase))
+            {
+                return await CrawlFromVietStockAsync(symbol, maxReports);
+            }
+
+            if (string.Equals(source.HtmlTemplate, "CafeF", StringComparison.OrdinalIgnoreCase))
+            {
+                return await CrawlFromCafeFAsync(symbol, maxReports);
+            }
+        }
+
+        _logger.LogWarning("Unknown financial source kind {Kind} for {SourceName}.", source.Kind, source.Name);
+        return Array.Empty<FinancialReport>();
+    }
+
+    private static IEnumerable<FinancialReport> DeduplicateReports(IEnumerable<FinancialReport> reports)
+    {
+        return reports
+            .GroupBy(r => new
+            {
+                Type = r.ReportType,
+                r.Year,
+                Quarter = r.Quarter ?? 0,
+                Day = r.ReportDate.Date
+            })
+            .Select(g => g.First())
+            .OrderByDescending(r => r.ReportDate);
     }
 
     /// <summary>

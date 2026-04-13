@@ -14,6 +14,11 @@ public sealed class NewsIngestionOptions
     public int MaxArticlesPerRun { get; set; } = 80;
 
     /// <summary>
+    /// If a source returns fewer than this count, fallback sources are attempted.
+    /// </summary>
+    public int MinItemsBeforeFallback { get; set; } = 5;
+
+    /// <summary>
     /// When empty, the crawler falls back to the legacy CafeF + VNExpress + VietStock HTML paths.
     /// </summary>
     public List<NewsSourceConfig> Sources { get; set; } = new();
@@ -32,6 +37,8 @@ public sealed class NewsSourceConfig
 {
     public string Name { get; set; } = "";
 
+    public bool Enabled { get; set; } = true;
+
     public string Kind { get; set; } = "HtmlBuiltin";
 
     public string? Url { get; set; }
@@ -49,4 +56,20 @@ public sealed class NewsSourceConfig
 
     /// <summary>Prefix for relative links in HtmlGeneric mode.</summary>
     public string? BaseUrl { get; set; }
+
+    /// <summary>
+    /// Lower value means higher priority in execution order.
+    /// </summary>
+    public int Priority { get; set; } = 100;
+
+    /// <summary>
+    /// Minimum number of items expected from this source before trying fallback sources.
+    /// If null, the pipeline-level threshold is used.
+    /// </summary>
+    public int? MinItemsBeforeFallback { get; set; }
+
+    /// <summary>
+    /// Secondary sources to be attempted when this source is unhealthy or returns too few items.
+    /// </summary>
+    public List<NewsSourceConfig> FallbackSources { get; set; } = new();
 }

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Http;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.Contracts.AI;
 using StockInvestment.Application.DTOs.AnalysisReports;
@@ -61,6 +62,18 @@ public partial class AIServiceClient : IAIService
                errorContent.Contains("exceeded your current quota", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsRateLimitOrBillingError(string errorContent)
+    {
+        return errorContent.Contains("429") ||
+               errorContent.Contains("402") ||
+               errorContent.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
+               errorContent.Contains("free-models-per-day", StringComparison.OrdinalIgnoreCase) ||
+               errorContent.Contains("free-models-per-min", StringComparison.OrdinalIgnoreCase) ||
+               errorContent.Contains("spend limit exceeded", StringComparison.OrdinalIgnoreCase) ||
+               errorContent.Contains("credits", StringComparison.OrdinalIgnoreCase) ||
+               errorContent.Contains("quota", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Handle HTTP error response and throw appropriate exception
     /// </summary>
@@ -71,6 +84,9 @@ public partial class AIServiceClient : IAIService
         
         // Check if it's a quota exceeded error (may be wrapped in 500 from AI service)
         bool isQuotaError = IsQuotaError(errorContent);
+        bool isRateLimitOrBillingError = IsRateLimitOrBillingError(errorContent) ||
+                                         statusCode == HttpStatusCode.TooManyRequests ||
+                                         (int)statusCode == 402;
         
         // Extract meaningful error message
         string errorMessage = errorContent;
@@ -135,6 +151,14 @@ public partial class AIServiceClient : IAIService
                 _logger.LogWarning(logMessage, statusCode, endpoint, errorContent);
         }
         
+        if (isRateLimitOrBillingError)
+        {
+            throw new Domain.Exceptions.ExternalServiceException(
+                "AI Service",
+                "AI đang quá tải hoặc đã chạm giới hạn sử dụng. Vui lòng thử lại sau ít phút.",
+                StatusCodes.Status429TooManyRequests);
+        }
+
         // Create exception with status code information
         var exception = new HttpRequestException($"AI service returned {statusCode}: {errorMessage}")
         {

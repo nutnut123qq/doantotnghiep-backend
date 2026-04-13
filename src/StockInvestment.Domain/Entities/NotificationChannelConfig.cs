@@ -16,9 +16,6 @@ public class NotificationChannelConfig
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     
-    // Concurrency control
-    public byte[] RowVersion { get; set; } = null!;
-    
     // Navigation
     public User User { get; set; } = null!;
 

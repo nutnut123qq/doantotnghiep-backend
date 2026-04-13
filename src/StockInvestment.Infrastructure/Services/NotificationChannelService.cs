@@ -4,11 +4,13 @@ using StockInvestment.Application.Contracts.Notifications;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Domain.Enums;
+using System.Globalization;
 
 namespace StockInvestment.Infrastructure.Services;
 
 public class NotificationChannelService : INotificationChannelService
 {
+    private static readonly CultureInfo ViVnCulture = new("vi-VN");
     private readonly IUnitOfWork _unitOfWork;
     private readonly INotificationTemplateService _templateService;
     private readonly IEnumerable<INotificationChannelSender> _senders;
@@ -38,6 +40,7 @@ public class NotificationChannelService : INotificationChannelService
         return new NotificationChannelConfigDto
         {
             HasSlackWebhook = !string.IsNullOrEmpty(config.SlackWebhookUrl),
+            SlackWebhookMasked = MaskSlackWebhook(config.SlackWebhookUrl),
             EnabledSlack = config.EnabledSlack,
             TelegramChatId = config.TelegramChatId,
             EnabledTelegram = config.EnabledTelegram
@@ -142,25 +145,29 @@ public class NotificationChannelService : INotificationChannelService
         var template = allTemplates
             .Where(t => t.EventType == eventType && t.IsActive)
             .FirstOrDefault();
-        if (template == null)
-        {
-            _logger.LogWarning("No template found for {EventType}", eventType);
-            return;
-        }
-
+        
         // Build variables ({AiExplanation} kept empty for older templates still stored in DB)
         var variables = new Dictionary<string, string>
         {
             { "Symbol", context.Alert.Ticker?.Symbol ?? "Unknown" },
             { "AlertType", context.Alert.Type.ToString() },
             { "Operator", context.Operator },  // Use directly
-            { "Threshold", context.Alert.Threshold?.ToString("N0") ?? "0" },
-            { "CurrentValue", context.CurrentValue.ToString("N0") },
+            { "Threshold", FormatAlertMetric(context.Alert.Type, context.Alert.Threshold) },
+            { "CurrentValue", FormatAlertMetric(context.Alert.Type, context.CurrentValue) },
             { "Time", context.TriggeredAt.ToString("yyyy-MM-dd HH:mm:ss") },
             { "AiExplanation", string.Empty }
         };
 
-        var message = await _templateService.RenderTemplateAsync(template.Id, variables, cancellationToken);
+        string message;
+        if (template == null)
+        {
+            _logger.LogWarning("No template found for {EventType}. Falling back to default alert message.", eventType);
+            message = BuildFallbackAlertMessage(context);
+        }
+        else
+        {
+            message = await _templateService.RenderTemplateAsync(template.Id, variables, cancellationToken);
+        }
 
         // Send to enabled channels
         if (config.EnabledSlack && !string.IsNullOrEmpty(config.SlackWebhookUrl))
@@ -234,5 +241,34 @@ public class NotificationChannelService : INotificationChannelService
             return false;
 
         return await sender.SendAsync(request, cancellationToken);
+    }
+
+    private static string BuildFallbackAlertMessage(AlertTriggeredContext context)
+    {
+        var symbol = context.Alert.Ticker?.Symbol ?? "Unknown";
+        var threshold = FormatAlertMetric(context.Alert.Type, context.Alert.Threshold);
+        var currentValue = FormatAlertMetric(context.Alert.Type, context.CurrentValue);
+        var alertType = context.Alert.Type.ToString();
+
+        return $"[{alertType}] {symbol} triggered: Current {currentValue} {context.Operator} Threshold {threshold} at {context.TriggeredAt:yyyy-MM-dd HH:mm:ss}";
+    }
+
+    private static string FormatAlertMetric(AlertType alertType, decimal? value)
+    {
+        var raw = value ?? 0m;
+        var normalized = alertType == AlertType.Price ? raw * 1000m : raw;
+        return normalized.ToString("N0", ViVnCulture);
+    }
+
+    private static string? MaskSlackWebhook(string? webhook)
+    {
+        if (string.IsNullOrWhiteSpace(webhook))
+            return null;
+
+        const int visibleSuffixLength = 8;
+        if (webhook.Length <= visibleSuffixLength)
+            return new string('*', webhook.Length);
+
+        return $"{new string('*', webhook.Length - visibleSuffixLength)}{webhook[^visibleSuffixLength..]}";
     }
 }

@@ -42,8 +42,9 @@ public class NewsCrawlerService : INewsCrawlerService
                 return FilterByBlockedUrlPaths(await CrawlLegacyParallelAsync(cap));
 
             var tasks = _options.Sources
-                .Where(s => !string.IsNullOrWhiteSpace(s.Name))
-                .Select(CrawlConfiguredSourceAsync);
+                .Where(s => s.Enabled && !string.IsNullOrWhiteSpace(s.Name))
+                .OrderBy(s => s.Priority)
+                .Select(s => CrawlConfiguredSourceWithFallbackAsync(s, _options.MinItemsBeforeFallback));
             var results = await Task.WhenAll(tasks);
             return FilterByBlockedUrlPaths(results.SelectMany(x => x))
                 .OrderByDescending(n => n.PublishedAt)
@@ -54,6 +55,64 @@ public class NewsCrawlerService : INewsCrawlerService
             _logger.LogError(ex, "Error crawling news from configured sources");
             return Array.Empty<News>();
         }
+    }
+
+    private async Task<IReadOnlyList<News>> CrawlConfiguredSourceWithFallbackAsync(
+        NewsSourceConfig source,
+        int pipelineMinItemsBeforeFallback,
+        HashSet<string>? visited = null)
+    {
+        var key = BuildSourceKey(source);
+        visited ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!visited.Add(key))
+        {
+            _logger.LogWarning("Detected recursive news fallback config for source {SourceName}. Skipping repeated source.", source.Name);
+            return Array.Empty<News>();
+        }
+
+        var fetched = (await CrawlConfiguredSourceAsync(source)).ToList();
+        var minItemsBeforeFallback = Math.Max(0, source.MinItemsBeforeFallback ?? pipelineMinItemsBeforeFallback);
+        _logger.LogInformation(
+            "News source {SourceName} fetched={FetchedCount} threshold={Threshold} fallbackCandidates={FallbackCount}",
+            source.Name,
+            fetched.Count,
+            minItemsBeforeFallback,
+            source.FallbackSources.Count);
+
+        if (fetched.Count >= minItemsBeforeFallback || source.FallbackSources.Count == 0)
+        {
+            return fetched;
+        }
+
+        var aggregate = new List<News>(fetched);
+        var orderedFallbacks = source.FallbackSources
+            .Where(s => s.Enabled && !string.IsNullOrWhiteSpace(s.Name))
+            .OrderBy(s => s.Priority)
+            .ToList();
+
+        _logger.LogWarning(
+            "News source {SourceName} returned too few items ({FetchedCount} < {Threshold}). Trying {FallbackCount} fallback sources.",
+            source.Name,
+            fetched.Count,
+            minItemsBeforeFallback,
+            orderedFallbacks.Count);
+
+        foreach (var fallback in orderedFallbacks)
+        {
+            var nestedVisited = new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase);
+            var fallbackItems = await CrawlConfiguredSourceWithFallbackAsync(
+                fallback,
+                pipelineMinItemsBeforeFallback,
+                nestedVisited);
+            aggregate.AddRange(fallbackItems);
+
+            if (aggregate.Count >= minItemsBeforeFallback)
+            {
+                break;
+            }
+        }
+
+        return aggregate;
     }
 
     private async Task<IEnumerable<News>> CrawlConfiguredSourceAsync(NewsSourceConfig source)
@@ -90,6 +149,9 @@ public class NewsCrawlerService : INewsCrawlerService
         return Array.Empty<News>();
     }
 
+    private static string BuildSourceKey(NewsSourceConfig source)
+        => $"{source.Name}|{source.Kind}|{source.Url}|{source.HtmlTemplate}";
+
     private async Task<IEnumerable<News>> CrawlHtmlBuiltinAsync(string? template, int maxArticles)
     {
         return template?.Trim().ToLowerInvariant() switch
@@ -112,18 +174,24 @@ public class NewsCrawlerService : INewsCrawlerService
         doc.LoadHtml(html);
         var nodes = doc.DocumentNode.SelectNodes(cfg.ItemXPath);
         if (nodes == null)
+        {
+            _logger.LogWarning("HtmlGeneric source {SourceName} matched 0 nodes. Url={Url}, ItemXPath={ItemXPath}", cfg.Name, cfg.Url, cfg.ItemXPath);
             return newsList;
+        }
+
+        _logger.LogInformation("HtmlGeneric source {SourceName} matched {NodeCount} nodes from {Url}", cfg.Name, nodes.Count, cfg.Url);
 
         foreach (var node in nodes.Take(maxArticles))
         {
-            if (string.IsNullOrWhiteSpace(cfg.TitleXPath))
-                continue;
-
-            var titleNode = node.SelectSingleNode(cfg.TitleXPath);
+            var titleNode = !string.IsNullOrWhiteSpace(cfg.TitleXPath)
+                ? node.SelectSingleNode(cfg.TitleXPath)
+                : node.SelectSingleNode(".//a");
             if (titleNode == null)
                 continue;
 
-            var title = titleNode.InnerText.Trim();
+            var title = HtmlEntity.DeEntitize(titleNode.InnerText).Trim();
+            if (string.IsNullOrWhiteSpace(title))
+                continue;
             string articleUrl;
             if (!string.IsNullOrWhiteSpace(cfg.LinkXPath))
             {
@@ -152,7 +220,7 @@ public class NewsCrawlerService : INewsCrawlerService
 
             var description = "";
             if (!string.IsNullOrWhiteSpace(cfg.SummaryXPath))
-                description = node.SelectSingleNode(cfg.SummaryXPath)?.InnerText.Trim() ?? "";
+                description = HtmlEntity.DeEntitize(node.SelectSingleNode(cfg.SummaryXPath)?.InnerText ?? "").Trim();
 
             var timeText = "";
             if (!string.IsNullOrWhiteSpace(cfg.TimeXPath))
@@ -162,6 +230,7 @@ public class NewsCrawlerService : INewsCrawlerService
             newsList.Add(CreateNews(title, description, cfg.Name, articleUrl, published));
         }
 
+        _logger.LogInformation("HtmlGeneric source {SourceName} parsed {ParsedCount} news items", cfg.Name, newsList.Count);
         return newsList;
     }
 
@@ -347,7 +416,7 @@ public class NewsCrawlerService : INewsCrawlerService
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
 
-            var newsNodes = doc.DocumentNode.SelectNodes("//article[@class='item-news']");
+            var newsNodes = doc.DocumentNode.SelectNodes("//article[contains(@class,'item-news')]");
 
             if (newsNodes == null) return newsList;
 
@@ -355,14 +424,20 @@ public class NewsCrawlerService : INewsCrawlerService
             {
                 try
                 {
-                    var titleNode = node.SelectSingleNode(".//h3[@class='title-news']/a");
+                    var titleNode =
+                        node.SelectSingleNode(".//h3[contains(@class,'title-news')]/a")
+                        ?? node.SelectSingleNode(".//h2[contains(@class,'title-news')]/a")
+                        ?? node.SelectSingleNode(".//a[contains(@href,'.html')]");
                     var descNode = node.SelectSingleNode(".//p[@class='description']");
                     var timeNode = node.SelectSingleNode(".//span[@class='time']");
 
-                    if (titleNode == null) continue;
+                    if (titleNode == null)
+                        continue;
 
-                    var title = titleNode.InnerText.Trim();
+                    var title = HtmlEntity.DeEntitize(titleNode.InnerText).Trim();
                     var articleUrl = titleNode.GetAttributeValue("href", "");
+                    if (string.IsNullOrWhiteSpace(articleUrl))
+                        continue;
                     var description = descNode?.InnerText.Trim() ?? "";
                     var timeText = timeNode?.InnerText.Trim() ?? "";
 

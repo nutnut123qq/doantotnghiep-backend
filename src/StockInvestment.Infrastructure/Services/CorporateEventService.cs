@@ -7,6 +7,9 @@ namespace StockInvestment.Infrastructure.Services;
 
 public class CorporateEventService : ICorporateEventService
 {
+    private const int MaxEventsToIngestPerQuestion = 10;
+    private static readonly TimeSpan IngestBudget = TimeSpan.FromSeconds(20);
+
     private readonly ILogger<CorporateEventService> _logger;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAIService _aiService;
@@ -42,15 +45,7 @@ public class CorporateEventService : ICorporateEventService
             };
         }
 
-        foreach (var ev in candidates)
-        {
-            await CorporateEventRagHelper.TryIngestForRagAsync(
-                _aiService,
-                ev,
-                normalizedSymbol,
-                _logger,
-                cancellationToken);
-        }
+        await IngestRecentEventsForRagAsync(candidates, normalizedSymbol, cancellationToken);
 
         static string Cap(string? text, int maxLen)
         {
@@ -71,5 +66,43 @@ public class CorporateEventService : ICorporateEventService
             symbol: normalizedSymbol,
             topK: topK,
             cancellationToken: cancellationToken);
+    }
+
+    private async Task IngestRecentEventsForRagAsync(
+        IReadOnlyList<CorporateEvent> candidates,
+        string symbol,
+        CancellationToken cancellationToken)
+    {
+        // Keep request latency predictable by ingesting only a small, freshest subset.
+        var eventsToIngest = candidates
+            .OrderByDescending(e => e.EventDate)
+            .Take(MaxEventsToIngestPerQuestion)
+            .ToList();
+
+        if (eventsToIngest.Count == 0)
+            return;
+
+        using var ingestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        ingestCts.CancelAfter(IngestBudget);
+
+        try
+        {
+            var ingestTasks = eventsToIngest.Select(ev =>
+                CorporateEventRagHelper.TryIngestForRagAsync(
+                    _aiService,
+                    ev,
+                    symbol,
+                    _logger,
+                    ingestCts.Token));
+
+            await Task.WhenAll(ingestTasks);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Corporate event RAG ingest exceeded {IngestBudgetMs}ms budget for {Symbol}; continuing with available context.",
+                IngestBudget.TotalMilliseconds,
+                symbol);
+        }
     }
 }

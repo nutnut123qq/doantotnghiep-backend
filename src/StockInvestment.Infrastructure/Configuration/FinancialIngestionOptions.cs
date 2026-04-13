@@ -23,6 +23,17 @@ public sealed class FinancialIngestionOptions
     public int MaxReportsPerSymbol { get; set; } = 10;
 
     /// <summary>
+    /// If the primary sources return fewer reports than this threshold, fallback sources are attempted.
+    /// </summary>
+    public int MinReportsBeforeFallback { get; set; } = 1;
+
+    /// <summary>
+    /// Crawl sources in priority order. Supports the same source shape as news/event ingestion.
+    /// Typical kinds: GraphQlPrimary, HtmlBuiltin, HtmlGeneric.
+    /// </summary>
+    public List<NewsSourceConfig> Sources { get; set; } = new();
+
+    /// <summary>
     /// Symbols merged ahead of the DB top-N list each run (e.g. dashboard favorites like VIC).
     /// Only symbols that exist in <c>StockTickers</c> are persisted.
     /// </summary>

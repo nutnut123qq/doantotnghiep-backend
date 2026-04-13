@@ -411,6 +411,20 @@ public static class ServiceCollectionExtensions
         .AddPolicyHandler((serviceProvider, request) =>
         {
             var policyService = serviceProvider.GetRequiredService<Infrastructure.Services.ResiliencePolicyService>();
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            var isHeavyAiEndpoint =
+                path.Contains("/api/qa", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("/api/rag/ingest", StringComparison.OrdinalIgnoreCase);
+
+            if (isHeavyAiEndpoint)
+            {
+                // Give heavy endpoints more room to recover while keeping protection.
+                return policyService.CreateCombinedPolicy(
+                    retryCount: 2,
+                    exceptionsAllowedBeforeBreaking: 5,
+                    durationOfBreak: TimeSpan.FromSeconds(30));
+            }
+
             return policyService.CreateCombinedPolicy(
                 retryCount: 3,
                 exceptionsAllowedBeforeBreaking: 5,

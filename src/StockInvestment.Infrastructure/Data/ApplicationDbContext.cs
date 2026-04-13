@@ -355,9 +355,13 @@ public class ApplicationDbContext : DbContext
             .HasIndex(c => c.UserId)
             .IsUnique();
 
+        // PostgreSQL-native optimistic concurrency token.
+        // Using xmin avoids maintaining a custom bytea row version column.
         modelBuilder.Entity<NotificationChannelConfig>()
-            .Property(c => c.RowVersion)
-            .IsRowVersion();
+            .Property<uint>("xmin")
+            .HasColumnName("xmin")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
 
         // Configure AnalysisReport table and indexes
         modelBuilder.Entity<AnalysisReport>()

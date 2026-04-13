@@ -1,8 +1,8 @@
 namespace StockInvestment.Infrastructure.Configuration;
 
 /// <summary>
-/// RSS ingestion for corporate events (maps announcement-style feeds to corporate event rows).
-/// Reuses <see cref="NewsSourceConfig"/> shape; phase 1 supports <c>Kind: Rss</c> only.
+/// Ingestion for corporate events (RSS first, optional HTML fallback).
+/// Reuses <see cref="NewsSourceConfig"/> shape for source and fallback definitions.
 /// </summary>
 public sealed class EventIngestionOptions
 {
@@ -15,6 +15,11 @@ public sealed class EventIngestionOptions
     public int PollMinutes { get; set; } = 15;
 
     public int MaxItemsPerRun { get; set; } = 40;
+
+    /// <summary>
+    /// If a source yields fewer than this count, fallback sources are attempted.
+    /// </summary>
+    public int MinItemsBeforeFallback { get; set; } = 2;
 
     public List<NewsSourceConfig> Sources { get; set; } = new();
 }

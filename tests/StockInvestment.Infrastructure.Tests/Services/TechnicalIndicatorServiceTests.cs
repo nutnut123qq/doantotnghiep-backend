@@ -1,3 +1,4 @@
+using System.Threading;
 using Xunit;
 using Moq;
 using Microsoft.Extensions.Logging;
@@ -10,14 +11,28 @@ namespace StockInvestment.Infrastructure.Tests.Services;
 public class TechnicalIndicatorServiceTests
 {
     private readonly Mock<IVNStockService> _mockVnStockService;
+    private readonly Mock<ICacheService> _mockCacheService;
     private readonly Mock<ILogger<TechnicalIndicatorService>> _mockLogger;
     private readonly TechnicalIndicatorService _service;
 
     public TechnicalIndicatorServiceTests()
     {
         _mockVnStockService = new Mock<IVNStockService>();
+        _mockCacheService = new Mock<ICacheService>();
         _mockLogger = new Mock<ILogger<TechnicalIndicatorService>>();
-        _service = new TechnicalIndicatorService(_mockVnStockService.Object, _mockLogger.Object);
+        _mockCacheService
+            .Setup(x => x.GetAsync<CachedDecimal>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((CachedDecimal?)null);
+        _mockCacheService
+            .Setup(x => x.GetAsync<MACDResult>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MACDResult?)null);
+        _mockCacheService
+            .Setup(x => x.GetAsync<List<OHLCVData>>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<OHLCVData>?)null);
+        _service = new TechnicalIndicatorService(
+            _mockVnStockService.Object,
+            _mockCacheService.Object,
+            _mockLogger.Object);
     }
 
     [Fact]
@@ -30,7 +45,7 @@ public class TechnicalIndicatorServiceTests
             .ReturnsAsync(historicalData);
 
         // Act
-        var result = await _service.CalculateMACDAsync("TEST");
+        var result = await _service.CalculateMACDAsync("VIC");
 
         // Assert: Không check MACD/Signal != 0 vì sideways có thể gần 0
         // Chỉ check MACD != Signal và histogram khác 0
@@ -48,7 +63,7 @@ public class TechnicalIndicatorServiceTests
             .ReturnsAsync(historicalData);
 
         // Act
-        var result = await _service.CalculateMACDAsync("TEST");
+        var result = await _service.CalculateMACDAsync("VIC");
 
         // Assert: với uptrend, cả MACD và Signal nên dương
         // Với trending tuyến tính, MACD và Signal có thể hội tụ (histogram ≈ 0)
@@ -68,12 +83,34 @@ public class TechnicalIndicatorServiceTests
             .ReturnsAsync(historicalData);
 
         // Act
-        var result = await _service.CalculateMACDAsync("TEST");
+        var result = await _service.CalculateMACDAsync("VIC");
 
         // Assert
         Assert.Equal(0, result.MACD);
         Assert.Equal(0, result.Signal);
         Assert.Equal(0, result.Histogram);
+    }
+
+    [Fact]
+    public async Task CalculateMAAsync_NonVn30Symbol_ReturnsZero()
+    {
+        var result = await _service.CalculateMAAsync("ZZZZ");
+        Assert.Equal(0, result);
+        _mockVnStockService.Verify(x => x.GetHistoricalDataAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CalculateRSIAsync_NonVn30Symbol_ReturnsNeutralDefault()
+    {
+        var result = await _service.CalculateRSIAsync("ZZZZ");
+        Assert.Equal(50, result);
+    }
+
+    [Fact]
+    public async Task CalculateAllIndicatorsAsync_NonVn30Symbol_ReturnsEmpty()
+    {
+        var result = await _service.CalculateAllIndicatorsAsync("ZZZZ");
+        Assert.Empty(result);
     }
 
     private List<OHLCVData> CreateHistoricalData(int count, decimal minPrice, decimal maxPrice)

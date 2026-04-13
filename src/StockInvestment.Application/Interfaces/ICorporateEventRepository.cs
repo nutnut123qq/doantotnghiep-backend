@@ -61,4 +61,14 @@ public interface ICorporateEventRepository
     /// Check if event exists for ticker on specific date
     /// </summary>
     Task<bool> ExistsAsync(Guid stockTickerId, CorporateEventType eventType, DateTime eventDate);
+
+    /// <summary>
+    /// True if an event was already ingested from this RSS/article URL.
+    /// </summary>
+    Task<bool> ExistsBySourceUrlAsync(string sourceUrl);
+
+    /// <summary>
+    /// Recent events for a symbol (by ticker), ordered newest first.
+    /// </summary>
+    Task<IReadOnlyList<CorporateEvent>> GetRecentBySymbolAsync(string symbol, DateTime sinceUtc, int take);
 }

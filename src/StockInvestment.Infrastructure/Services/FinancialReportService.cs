@@ -15,17 +15,20 @@ public class FinancialReportService : IFinancialReportService
     private readonly ApplicationDbContext _context;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAIService _aiService;
+    private readonly IFinancialReportCrawlerService _crawlerService;
     private readonly ILogger<FinancialReportService> _logger;
 
     public FinancialReportService(
         ApplicationDbContext context,
         IUnitOfWork unitOfWork,
         IAIService aiService,
+        IFinancialReportCrawlerService crawlerService,
         ILogger<FinancialReportService> logger)
     {
         _context = context;
         _unitOfWork = unitOfWork;
         _aiService = aiService;
+        _crawlerService = crawlerService;
         _logger = logger;
     }
 
@@ -133,6 +136,47 @@ public class FinancialReportService : IFinancialReportService
             _logger.LogError(ex, "Error adding financial reports");
             throw;
         }
+    }
+
+    public async Task<IReadOnlyList<FinancialReport>> CrawlAndPersistReportsForSymbolAsync(string symbol, int maxReports, CancellationToken cancellationToken = default)
+    {
+        var normalizedSymbol = symbol.ToUpperInvariant();
+        var ticker = await _context.StockTickers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.Symbol == normalizedSymbol, cancellationToken);
+
+        if (ticker == null)
+        {
+            _logger.LogWarning("Crawl skipped: ticker {Symbol} not found", normalizedSymbol);
+            return Array.Empty<FinancialReport>();
+        }
+
+        var crawled = (await _crawlerService.CrawlReportsBySymbolAsync(normalizedSymbol, maxReports)).ToList();
+        foreach (var report in crawled)
+        {
+            report.TickerId = ticker.Id;
+        }
+
+        var existingKeys = await _context.FinancialReports
+            .Where(r => r.TickerId == ticker.Id)
+            .Select(r => new { r.ReportType, r.Year, r.Quarter, r.ReportDate })
+            .ToListAsync(cancellationToken);
+
+        var toInsert = crawled
+            .Where(r => !existingKeys.Any(e =>
+                e.ReportType == r.ReportType
+                && e.Year == r.Year
+                && e.Quarter == r.Quarter
+                && e.ReportDate == r.ReportDate))
+            .ToList();
+
+        if (toInsert.Count == 0)
+        {
+            return Array.Empty<FinancialReport>();
+        }
+
+        await AddReportsRangeAsync(toInsert);
+        return toInsert;
     }
 
     public async Task<QuestionAnswerResult> AskQuestionAsync(Guid reportId, string question)

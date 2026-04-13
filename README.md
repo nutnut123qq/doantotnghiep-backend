@@ -59,10 +59,16 @@ Update `appsettings.json`:
     "Redis": "localhost:6379"
   },
   "AIService": {
-    "Url": "http://localhost:8000"
+    "BaseUrl": "http://localhost:8000"
+  },
+  "StockAnalyst": {
+    "Enabled": false,
+    "BaseUrl": ""
   }
 }
 ```
+
+Run **one** Python service from the repo root folder `ai` (`uvicorn main:app --port 8000`). `AIService:BaseUrl` should target that URL. For LangGraph-backed single-symbol forecast on the dashboard, set `StockAnalyst:Enabled` to `true`; leave `StockAnalyst:BaseUrl` empty to reuse `AIService:BaseUrl`.
 
 **Environment Variables:**
 

@@ -13,4 +13,6 @@ public class ToggleAlertResponse
 {
     public Guid Id { get; set; }
     public bool IsActive { get; set; }
+    /// <summary>Cleared when re-enabling so the alert can trigger again.</summary>
+    public DateTime? TriggeredAt { get; set; }
 }

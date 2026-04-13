@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Domain.ValueObjects;
 
@@ -10,7 +9,7 @@ namespace StockInvestment.Application.Specifications;
 public class UserByEmailSpecification : BaseSpecification<User>
 {
     public UserByEmailSpecification(Email email)
-        : base(u => u.Email.Value == email.Value)
+        : base(u => u.Email == email)
     {
     }
 }

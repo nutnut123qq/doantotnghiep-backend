@@ -15,8 +15,6 @@ Condition: Price {Operator} {Threshold}
 Current Price: {CurrentValue}
 Time: {Time}
 
-💡 {AiExplanation}
-
 ---
 Stock Investment Platform',
   true,
@@ -38,8 +36,6 @@ Stock: {Symbol}
 Threshold: {Threshold}
 Current Volume: {CurrentValue}
 Time: {Time}
-
-💡 {AiExplanation}
 
 ---
 Stock Investment Platform',

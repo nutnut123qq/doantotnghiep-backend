@@ -24,7 +24,7 @@ public static class ApplicationBuilderExtensions
             app.UseSwaggerUI();
         }
 
-        app.UseCors("AllowAll");
+        app.UseCors("FrontendCors");
 
         // Use Correlation ID Middleware (first to track all requests)
         app.UseMiddleware<Middleware.CorrelationIdMiddleware>();
@@ -49,7 +49,12 @@ public static class ApplicationBuilderExtensions
         // Use Response Compression (must be before other middleware)
         app.UseResponseCompression();
 
-        app.UseHttpsRedirection();
+        // Avoid noisy warning in local dev when running HTTP-only profile.
+        var forceHttpsInDevelopment = app.Configuration.GetValue<bool>("Kestrel:ForceHttpsRedirectionInDevelopment");
+        if (!app.Environment.IsDevelopment() || forceHttpsInDevelopment)
+        {
+            app.UseHttpsRedirection();
+        }
 
         // Use Response Caching
         app.UseResponseCaching();

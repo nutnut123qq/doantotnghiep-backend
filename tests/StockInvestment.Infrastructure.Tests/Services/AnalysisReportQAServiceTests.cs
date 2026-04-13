@@ -8,6 +8,7 @@ using StockInvestment.Domain.Entities;
 using StockInvestment.Infrastructure.Data;
 using StockInvestment.Infrastructure.Services;
 using Xunit;
+using StockInvestment.Domain.Exceptions;
 
 namespace StockInvestment.Infrastructure.Tests.Services;
 
@@ -189,6 +190,46 @@ public class AnalysisReportQAServiceTests : IDisposable
         Assert.Equal(sources[0].Title, result.Citations[0].Title);
         Assert.Equal(sources[0].SourceUrl, result.Citations[0].Url);
         Assert.Equal(sources[0].TextPreview, result.Citations[0].Excerpt);
+    }
+
+    [Fact]
+    public async Task AskQuestionAsync_ReportNotFound_ThrowsNotFoundException()
+    {
+        await Assert.ThrowsAsync<NotFoundException>(() => _service.AskQuestionAsync(Guid.NewGuid(), "Question"));
+    }
+
+    [Fact]
+    public async Task AskQuestionAsync_WhenFinancialAndNewsFail_StillAnswersWithFallbackContext()
+    {
+        var report = new AnalysisReport
+        {
+            Symbol = "VNM",
+            Title = "Report VNM",
+            FirmName = "Test Firm",
+            PublishedAt = new DateTime(2026, 1, 1),
+            Content = "content"
+        };
+        _context.AnalysisReports.Add(report);
+        await _context.SaveChangesAsync();
+
+        _financialService.Setup(x => x.GetLatestFinancialSnapshotAsync("VNM"))
+            .ThrowsAsync(new InvalidOperationException("financial unavailable"));
+        _newsService.Setup(x => x.GetRecentNewsForSymbolAsync("VNM", 7, 5))
+            .ThrowsAsync(new InvalidOperationException("news unavailable"));
+        _aiService.Setup(x => x.AnswerQuestionAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QuestionAnswerResult { Answer = "fallback answer", Sources = new List<SourceObject>() });
+
+        var result = await _service.AskQuestionAsync(report.Id, "Any question");
+
+        Assert.Equal("fallback answer", result.Answer);
+        Assert.Empty(result.Citations);
     }
 
     public void Dispose()

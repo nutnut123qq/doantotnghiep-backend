@@ -63,6 +63,13 @@ public class GlobalExceptionHandlerMiddleware
                     Error = unauthorizedEx.Message,
                     TraceId = context.TraceIdentifier
                 }),
+            UnauthorizedAccessException unauthorizedAccessEx => (
+                StatusCodes.Status401Unauthorized,
+                new ErrorResponse
+                {
+                    Error = unauthorizedAccessEx.Message,
+                    TraceId = context.TraceIdentifier
+                }),
 
             ForbiddenException forbiddenEx => (
                 StatusCodes.Status403Forbidden,

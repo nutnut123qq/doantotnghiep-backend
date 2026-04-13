@@ -10,6 +10,7 @@ public interface IAIService
     Task<NewsSummaryResult> SummarizeNewsDetailedAsync(string newsContent, CancellationToken cancellationToken = default);
     Task<string> AnalyzeEventAsync(string eventDescription, CancellationToken cancellationToken = default);
     Task<EventAnalysisResult> AnalyzeEventDetailedAsync(string eventDescription, CancellationToken cancellationToken = default);
+    [Obsolete("Use GenerateForecastBySymbolAsync instead. Guid-based forecast contract is legacy.")]
     Task<object> GenerateForecastAsync(Guid tickerId, CancellationToken cancellationToken = default);
     Task<ForecastResult> GenerateForecastBySymbolAsync(string symbol, string timeHorizon = "short", CancellationToken cancellationToken = default);
     Task<ForecastResult> GenerateForecastWithDataAsync(string symbol, string timeHorizon, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
@@ -36,7 +37,6 @@ public interface IAIService
         CancellationToken cancellationToken = default);
     Task<ParsedAlert> ParseAlertAsync(string naturalLanguageInput, CancellationToken cancellationToken = default);
     Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
-    Task<string?> GetAlertExplanationAsync(string symbol, string alertType, decimal currentValue, decimal threshold, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Answer a question with provided context parts (for Analysis Reports Q&A)
@@ -90,6 +90,8 @@ public class InsightResult
     public decimal? TargetPrice { get; set; }
     public decimal? StopLoss { get; set; }
     public DateTime GeneratedAt { get; set; }
+    public List<string>? Evidence { get; set; }
+    public Dictionary<string, string>? Metadata { get; set; }
 }
 
 public class NewsSummaryResult

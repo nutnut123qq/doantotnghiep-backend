@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Constants;
 
 namespace StockInvestment.Application.Features.Watchlist.AddStockToWatchlist;
 
@@ -30,6 +31,15 @@ public class AddStockToWatchlistHandler : IRequestHandler<AddStockToWatchlistCom
             {
                 Success = false,
                 Message = "Watchlist not found"
+            };
+        }
+
+        if (!Vn30Universe.Contains(request.Symbol))
+        {
+            return new AddStockToWatchlistResponse
+            {
+                Success = false,
+                Message = "Only VN30 stocks can be added to a watchlist."
             };
         }
 

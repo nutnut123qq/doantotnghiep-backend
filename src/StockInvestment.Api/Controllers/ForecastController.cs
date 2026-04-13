@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using StockInvestment.Application.Configuration;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.DTOs.Forecast;
 using StockInvestment.Domain.Constants;
@@ -17,19 +19,28 @@ public class ForecastController : ControllerBase
     private readonly ILogger<ForecastController> _logger;
     private readonly ICacheService _cacheService;
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
+    private readonly IOptions<StockAnalystOptions> _stockAnalystOptions;
+    private readonly ILangGraphForecastClient _langGraphForecastClient;
+    private readonly ILangGraphForecastMapper _langGraphForecastMapper;
 
     public ForecastController(
         IAIService aiService,
         ITechnicalDataService technicalDataService,
         ILogger<ForecastController> logger,
         ICacheService cacheService,
-        ICacheKeyGenerator cacheKeyGenerator)
+        ICacheKeyGenerator cacheKeyGenerator,
+        IOptions<StockAnalystOptions> stockAnalystOptions,
+        ILangGraphForecastClient langGraphForecastClient,
+        ILangGraphForecastMapper langGraphForecastMapper)
     {
         _aiService = aiService;
         _technicalDataService = technicalDataService;
         _logger = logger;
         _cacheService = cacheService;
         _cacheKeyGenerator = cacheKeyGenerator;
+        _stockAnalystOptions = stockAnalystOptions;
+        _langGraphForecastClient = langGraphForecastClient;
+        _langGraphForecastMapper = langGraphForecastMapper;
     }
 
     /// <summary>
@@ -38,10 +49,16 @@ public class ForecastController : ControllerBase
     [HttpGet("{symbol}")]
     public async Task<IActionResult> GetForecast(
         string symbol,
-        [FromQuery] string timeHorizon = "short")
+        [FromQuery] string timeHorizon = "short",
+        CancellationToken cancellationToken = default)
     {
         try
         {
+            if (_stockAnalystOptions.Value.Enabled)
+            {
+                return await GetForecastViaLangGraphAsync(symbol, timeHorizon, cancellationToken);
+            }
+
             // Check cache first (cache for 4 hours to optimize quota usage)
             var cacheKey = _cacheKeyGenerator.GenerateForecastKey(symbol, timeHorizon);
             var cachedForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
@@ -197,6 +214,81 @@ public class ForecastController : ControllerBase
             });
         }
         // Let GlobalExceptionHandlerMiddleware handle any remaining exceptions
+    }
+
+    private async Task<IActionResult> GetForecastViaLangGraphAsync(
+        string symbol,
+        string timeHorizon,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = _cacheKeyGenerator.GenerateLangGraphForecastKey(symbol, timeHorizon);
+        var cached = await _cacheService.GetAsync<ForecastResult>(cacheKey);
+        if (cached != null)
+        {
+            _logger.LogDebug(
+                "Returning cached LangGraph forecast for {Symbol} timeHorizon {TimeHorizon}",
+                symbol,
+                timeHorizon);
+            return Ok(cached);
+        }
+
+        try
+        {
+            var response = await _langGraphForecastClient.AnalyzeAsync(symbol, cancellationToken);
+            if (response == null)
+            {
+                return StatusCode(503, new
+                {
+                    error = "Stock analyst unavailable",
+                    message = "Dịch vụ phân tích LangGraph không trả về dữ liệu. Vui lòng kiểm tra Python ai (POST /api/analyze).",
+                    symbol
+                });
+            }
+
+            var forecast = _langGraphForecastMapper.Map(response, symbol, timeHorizon);
+            await _cacheService.SetAsync(cacheKey, forecast, TimeSpan.FromHours(4));
+            return Ok(forecast);
+        }
+        catch (HttpRequestException httpEx)
+        {
+            var status = ExtractStatusCode(httpEx);
+            _logger.LogError(httpEx, "LangGraph HTTP error for {Symbol} status {Status}", symbol, status);
+
+            if (status == (int)HttpStatusCode.TooManyRequests)
+            {
+                var cachedForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
+                if (cachedForecast != null)
+                {
+                    _logger.LogInformation("Returning cached LangGraph forecast for {Symbol} due to 429", symbol);
+                    return Ok(cachedForecast);
+                }
+
+                return StatusCode(429, new
+                {
+                    error = "Quota exceeded",
+                    message = httpEx.Message,
+                    symbol
+                });
+            }
+
+            return StatusCode(503, new
+            {
+                error = "Stock analyst unavailable",
+                message = $"Không gọi được dịch vụ LangGraph ({status}): {httpEx.Message}",
+                symbol
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "LangGraph forecast failed for {Symbol}", symbol);
+            return StatusCode(503, new
+            {
+                error = "Stock analyst error",
+                message = "Lỗi khi chạy phân tích LangGraph. Vui lòng thử lại sau.",
+                symbol,
+                details = ex.Message
+            });
+        }
     }
 
     private string GetRSILabel(decimal rsi)

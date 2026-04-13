@@ -46,3 +46,6 @@ finally
 {
     Log.CloseAndFlush();
 }
+
+// Expose Program for WebApplicationFactory<Program> in integration tests (top-level statements generate internal class otherwise)
+public partial class Program { }

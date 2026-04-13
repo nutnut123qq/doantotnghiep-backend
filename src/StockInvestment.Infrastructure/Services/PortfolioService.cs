@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Constants;
 using StockInvestment.Domain.Entities;
 
 namespace StockInvestment.Infrastructure.Services;
@@ -12,6 +13,7 @@ public class PortfolioService : IPortfolioService
     private readonly IStockDataService _stockDataService;
     private readonly ICacheService _cacheService;
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
+    private const decimal UnitScale = 1000m;
 
     public PortfolioService(
         ILogger<PortfolioService> logger,
@@ -62,6 +64,7 @@ public class PortfolioService : IPortfolioService
                 tickers.TryGetValue(portfolio.Symbol, out var ticker);
                 
                 var currentPrice = ticker?.CurrentPrice ?? portfolio.CurrentPrice;
+                currentPrice = NormalizeCurrentPriceIfNeeded(currentPrice, portfolio.AvgPrice, portfolio.Symbol);
                 var name = ticker?.Name ?? portfolio.Name;
 
                 // Calculate values
@@ -139,6 +142,7 @@ public class PortfolioService : IPortfolioService
             {
                 tickers.TryGetValue(portfolio.Symbol, out var ticker);
                 var currentPrice = ticker?.CurrentPrice ?? portfolio.CurrentPrice;
+                currentPrice = NormalizeCurrentPriceIfNeeded(currentPrice, portfolio.AvgPrice, portfolio.Symbol);
                 
                 totalValue += portfolio.Shares * currentPrice;
                 totalCost += portfolio.Shares * portfolio.AvgPrice;
@@ -172,6 +176,11 @@ public class PortfolioService : IPortfolioService
     {
         try
         {
+            if (!Vn30Universe.Contains(request.Symbol))
+            {
+                throw new Domain.Exceptions.ValidationException("Symbol", "Only VN30 symbols are supported.");
+            }
+
             // Validate symbol exists
             var ticker = await _stockDataService.GetTickerBySymbolAsync(request.Symbol);
             if (ticker == null)
@@ -192,6 +201,7 @@ public class PortfolioService : IPortfolioService
                 existingHolding.Shares = totalShares;
                 existingHolding.AvgPrice = newAvgPrice;
                 existingHolding.CurrentPrice = ticker.CurrentPrice;
+                existingHolding.CurrentPrice = NormalizeCurrentPriceIfNeeded(existingHolding.CurrentPrice, existingHolding.AvgPrice, existingHolding.Symbol);
                 existingHolding.Name = ticker.Name;
                 existingHolding.UpdatedAt = DateTime.UtcNow;
 
@@ -288,6 +298,7 @@ public class PortfolioService : IPortfolioService
             if (ticker != null)
             {
                 portfolio.CurrentPrice = ticker.CurrentPrice;
+                portfolio.CurrentPrice = NormalizeCurrentPriceIfNeeded(portfolio.CurrentPrice, portfolio.AvgPrice, portfolio.Symbol);
                 portfolio.Name = ticker.Name;
             }
 
@@ -347,5 +358,26 @@ public class PortfolioService : IPortfolioService
             _logger.LogError(ex, "Error deleting holding {HoldingId} for user {UserId}", holdingId, userId);
             throw;
         }
+    }
+
+    private decimal NormalizeCurrentPriceIfNeeded(decimal currentPrice, decimal avgPrice, string symbol)
+    {
+        if (currentPrice <= 0 || avgPrice <= 0)
+        {
+            return currentPrice;
+        }
+
+        if (currentPrice < 1000m && avgPrice >= 10_000m)
+        {
+            var normalized = currentPrice * UnitScale;
+            _logger.LogWarning(
+                "Detected legacy thousand-VND current price for {Symbol}. Auto-normalized from {CurrentPrice} to {NormalizedPrice}",
+                symbol,
+                currentPrice,
+                normalized);
+            return normalized;
+        }
+
+        return currentPrice;
     }
 }

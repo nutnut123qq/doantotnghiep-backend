@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using StockInvestment.Domain.Constants;
 using StockInvestment.Infrastructure.Hubs;
 using StockInvestment.Application.Interfaces;
 
@@ -68,15 +69,9 @@ public class StockPriceUpdateJob : BackgroundService
             var vnStockService = scope.ServiceProvider.GetRequiredService<IVNStockService>();
             var unitOfWork = scope.ServiceProvider.GetRequiredService<StockInvestment.Application.Interfaces.IUnitOfWork>();
             var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<TradingHub>>();
-            // Lấy danh sách VN30 để cập nhật
-            var vn30Symbols = new[]
-            {
-                "VIC", "VNM", "VCB", "VRE", "VHM", "GAS", "MSN", "BID", "CTG", "HPG",
-                "TCB", "MBB", "VPB", "PLX", "SAB", "VJC", "GVR", "FPT", "POW", "SSI",
-                "MWG", "HDB", "ACB", "TPB", "STB", "PDR", "VIB", "BCM", "KDH", "NVL"
-            };
+            var vn30Symbols = Vn30Universe.Symbols;
 
-            _logger.LogInformation("Updating prices for {Count} stocks", vn30Symbols.Length);
+            _logger.LogInformation("Updating prices for {Count} stocks", vn30Symbols.Count);
 
             var quotes = await vnStockService.GetQuotesAsync(vn30Symbols);
             var quotesList = quotes.ToList();
@@ -92,8 +87,24 @@ public class StockPriceUpdateJob : BackgroundService
             // Update existing or add new tickers in-memory
             foreach (var quote in quotesList)
             {
+                if (quote.CurrentPrice <= 0)
+                {
+                    _logger.LogWarning("Skipping quote update for {Symbol}: invalid current price {Price}", quote.Symbol, quote.CurrentPrice);
+                    continue;
+                }
+
                 if (existingStocksDict.TryGetValue(quote.Symbol, out var existingStock))
                 {
+                    if (IsSuspiciousPriceScale(existingStock.CurrentPrice, quote.CurrentPrice))
+                    {
+                        _logger.LogWarning(
+                            "Skipping quote update for {Symbol}: suspicious scale change old={OldPrice} new={NewPrice}",
+                            quote.Symbol,
+                            existingStock.CurrentPrice,
+                            quote.CurrentPrice);
+                        continue;
+                    }
+
                     // Cập nhật giá
                     existingStock.CurrentPrice = quote.CurrentPrice;
                     existingStock.PreviousClose = quote.PreviousClose;
@@ -135,6 +146,17 @@ public class StockPriceUpdateJob : BackgroundService
                 distributedLock.Dispose();
             }
         }
+    }
+
+    private static bool IsSuspiciousPriceScale(decimal previousPrice, decimal newPrice)
+    {
+        if (previousPrice <= 0 || newPrice <= 0)
+        {
+            return false;
+        }
+
+        var ratio = newPrice > previousPrice ? newPrice / previousPrice : previousPrice / newPrice;
+        return ratio >= 20m;
     }
 }
 

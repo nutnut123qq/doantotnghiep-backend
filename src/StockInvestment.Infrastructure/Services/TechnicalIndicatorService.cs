@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Constants;
 using StockInvestment.Domain.Entities;
 
 namespace StockInvestment.Infrastructure.Services;
@@ -7,13 +8,18 @@ namespace StockInvestment.Infrastructure.Services;
 public class TechnicalIndicatorService : ITechnicalIndicatorService
 {
     private readonly IVNStockService _vnStockService;
+    private readonly ICacheService _cacheService;
     private readonly ILogger<TechnicalIndicatorService> _logger;
+    private static readonly TimeSpan IndicatorCacheTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan HistoricalDataCacheTtl = TimeSpan.FromMinutes(2);
 
     public TechnicalIndicatorService(
         IVNStockService vnStockService,
+        ICacheService cacheService,
         ILogger<TechnicalIndicatorService> logger)
     {
         _vnStockService = vnStockService;
+        _cacheService = cacheService;
         _logger = logger;
     }
 
@@ -21,10 +27,22 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
     {
         try
         {
+            if (!Vn30Universe.Contains(symbol))
+            {
+                return 0;
+            }
+
+            var cacheKey = $"indicator:ma:{symbol.ToUpperInvariant()}:{period}";
+            var cached = await _cacheService.GetAsync<CachedDecimal>(cacheKey);
+            if (cached != null)
+            {
+                return cached.Value;
+            }
+
             var endDate = DateTime.UtcNow;
             var startDate = endDate.AddDays(-(period + 10)); // Extra days for calculation
 
-            var historicalData = await _vnStockService.GetHistoricalDataAsync(symbol, startDate, endDate);
+            var historicalData = await GetHistoricalDataCachedAsync(symbol, startDate, endDate);
             var dataList = historicalData.OrderBy(d => d.Date).ToList();
 
             if (dataList.Count < period)
@@ -35,6 +53,7 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
 
             var recentData = dataList.TakeLast(period);
             var ma = recentData.Average(d => d.Close);
+            await _cacheService.SetAsync(cacheKey, new CachedDecimal(ma), IndicatorCacheTtl);
 
             return ma;
         }
@@ -49,10 +68,22 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
     {
         try
         {
+            if (!Vn30Universe.Contains(symbol))
+            {
+                return 50;
+            }
+
+            var cacheKey = $"indicator:rsi:{symbol.ToUpperInvariant()}:{period}";
+            var cached = await _cacheService.GetAsync<CachedDecimal>(cacheKey);
+            if (cached != null)
+            {
+                return cached.Value;
+            }
+
             var endDate = DateTime.UtcNow;
             var startDate = endDate.AddDays(-(period + 20));
 
-            var historicalData = await _vnStockService.GetHistoricalDataAsync(symbol, startDate, endDate);
+            var historicalData = await GetHistoricalDataCachedAsync(symbol, startDate, endDate);
             var dataList = historicalData.OrderBy(d => d.Date).ToList();
 
             if (dataList.Count < period + 1)
@@ -87,6 +118,7 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
 
             var rs = avgGain / avgLoss;
             var rsi = 100 - (100 / (1 + rs));
+            await _cacheService.SetAsync(cacheKey, new CachedDecimal(rsi), IndicatorCacheTtl);
 
             return rsi;
         }
@@ -101,10 +133,22 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
     {
         try
         {
+            if (!Vn30Universe.Contains(symbol))
+            {
+                return new MACDResult();
+            }
+
+            var cacheKey = $"indicator:macd:{symbol.ToUpperInvariant()}:{fastPeriod}:{slowPeriod}:{signalPeriod}";
+            var cached = await _cacheService.GetAsync<MACDResult>(cacheKey);
+            if (cached != null)
+            {
+                return cached;
+            }
+
             var endDate = DateTime.UtcNow;
             var startDate = endDate.AddDays(-(slowPeriod + signalPeriod + 30));
 
-            var historicalData = await _vnStockService.GetHistoricalDataAsync(symbol, startDate, endDate);
+            var historicalData = await GetHistoricalDataCachedAsync(symbol, startDate, endDate);
             var dataList = historicalData.OrderBy(d => d.Date).ToList();
 
             // 1. Check insufficient data (cần +1 để tránh edge case)
@@ -159,12 +203,14 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
             var signalLine = signalSeries.Last();
             var histogram = macdLine - signalLine;
 
-            return new MACDResult
+            var result = new MACDResult
             {
                 MACD = macdLine,
                 Signal = signalLine,
                 Histogram = histogram
             };
+            await _cacheService.SetAsync(cacheKey, result, IndicatorCacheTtl);
+            return result;
         }
         catch (Exception ex)
         {
@@ -177,10 +223,22 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
     {
         try
         {
-            var ma20 = await CalculateMAAsync(symbol, 20);
-            var ma50 = await CalculateMAAsync(symbol, 50);
-            var rsi = await CalculateRSIAsync(symbol, 14);
-            var macd = await CalculateMACDAsync(symbol);
+            if (!Vn30Universe.Contains(symbol))
+            {
+                return new List<TechnicalIndicator>();
+            }
+
+            var normalizedSymbol = symbol.ToUpperInvariant();
+            var endDate = DateTime.UtcNow;
+            var startDate = endDate.AddDays(-90);
+            var historicalData = (await GetHistoricalDataCachedAsync(normalizedSymbol, startDate, endDate))
+                .OrderBy(d => d.Date)
+                .ToList();
+
+            var ma20 = ComputeMAOrNull(historicalData, 20);
+            var ma50 = ComputeMAOrNull(historicalData, 50);
+            var rsi = ComputeRSIOrNull(historicalData, 14);
+            var macd = ComputeMACDOrNull(historicalData, 12, 26, 9);
 
             return BuildIndicatorList(ma20, ma50, rsi, macd);
         }
@@ -191,24 +249,26 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
         }
     }
 
-    private List<TechnicalIndicator> BuildIndicatorList(decimal ma20, decimal ma50, decimal rsi, MACDResult macd)
+    private List<TechnicalIndicator> BuildIndicatorList(decimal? ma20, decimal? ma50, decimal? rsi, MACDResult? macd)
     {
         var indicators = new List<TechnicalIndicator>();
-        var trend = GetTrendAssessment(rsi, macd);
+        var trend = GetTrendAssessmentOrNull(rsi, macd);
 
         // MACD trend với epsilon để tránh coi histogram ≈ 0 là Bearish
-        var macdTrend = macd.Histogram > 0.0001m ? "Bullish" :
-                        macd.Histogram < -0.0001m ? "Bearish" : "Neutral";
+        var macdTrend = macd == null
+            ? null
+            : macd.Histogram > 0.0001m ? "Bullish" :
+              macd.Histogram < -0.0001m ? "Bearish" : "Neutral";
 
         indicators.Add(CreateIndicatorEntity("MA20", ma20, trend));
         indicators.Add(CreateIndicatorEntity("MA50", ma50, trend));
-        indicators.Add(CreateIndicatorEntity("RSI", rsi, GetRSITrend(rsi)));
-        indicators.Add(CreateIndicatorEntity("MACD", macd.MACD, macdTrend));
+        indicators.Add(CreateIndicatorEntity("RSI", rsi, rsi.HasValue ? GetRSITrend(rsi.Value) : null));
+        indicators.Add(CreateIndicatorEntity("MACD", macd?.MACD, macdTrend));
 
         return indicators;
     }
 
-    private TechnicalIndicator CreateIndicatorEntity(string indicatorType, decimal value, string trendAssessment)
+    private TechnicalIndicator CreateIndicatorEntity(string indicatorType, decimal? value, string? trendAssessment)
     {
         return new TechnicalIndicator
         {
@@ -217,6 +277,16 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
             TrendAssessment = trendAssessment,
             CalculatedAt = DateTime.UtcNow
         };
+    }
+
+    private string? GetTrendAssessmentOrNull(decimal? rsi, MACDResult? macd)
+    {
+        if (!rsi.HasValue || macd == null)
+        {
+            return null;
+        }
+
+        return GetTrendAssessment(rsi.Value, macd);
     }
 
     public string GetTrendAssessment(decimal rsi, MACDResult macd)
@@ -280,4 +350,109 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
         // VD: EMA12 bắt đầu từ index 11, EMA26 từ index 25
         return (period - 1, values);
     }
+
+    private async Task<List<OHLCVData>> GetHistoricalDataCachedAsync(string symbol, DateTime startDate, DateTime endDate)
+    {
+        var cacheKey = $"historical:{symbol.ToUpperInvariant()}:{startDate:yyyyMMdd}:{endDate:yyyyMMdd}";
+        var cached = await _cacheService.GetAsync<List<OHLCVData>>(cacheKey);
+        if (cached != null)
+        {
+            return cached;
+        }
+
+        var data = (await _vnStockService.GetHistoricalDataAsync(symbol, startDate, endDate))
+            .OrderBy(d => d.Date)
+            .ToList();
+        await _cacheService.SetAsync(cacheKey, data, HistoricalDataCacheTtl);
+        return data;
+    }
+
+    private decimal? ComputeMAOrNull(List<OHLCVData> data, int period)
+    {
+        if (data.Count < period) return null;
+        return data.TakeLast(period).Average(d => d.Close);
+    }
+
+    private decimal? ComputeRSIOrNull(List<OHLCVData> data, int period)
+    {
+        if (data.Count < period + 1) return null;
+
+        var gains = new List<decimal>();
+        var losses = new List<decimal>();
+        for (int i = 1; i < data.Count; i++)
+        {
+            var change = data[i].Close - data[i - 1].Close;
+            if (change > 0)
+            {
+                gains.Add(change);
+                losses.Add(0);
+            }
+            else
+            {
+                gains.Add(0);
+                losses.Add(Math.Abs(change));
+            }
+        }
+
+        var avgGain = gains.TakeLast(period).DefaultIfEmpty(0).Average();
+        var avgLoss = losses.TakeLast(period).DefaultIfEmpty(0).Average();
+        if (avgLoss == 0) return 100;
+        var rs = avgGain / avgLoss;
+        return 100 - (100 / (1 + rs));
+    }
+
+    private MACDResult? ComputeMACDOrNull(List<OHLCVData> data, int fastPeriod, int slowPeriod, int signalPeriod)
+    {
+        var prices = data.Select(d => d.Close).ToList();
+        if (prices.Count < slowPeriod + signalPeriod + 1)
+        {
+            return null;
+        }
+
+        var (fastStart, fastEMA) = CalculateEMASeries(prices, fastPeriod);
+        var (slowStart, slowEMA) = CalculateEMASeries(prices, slowPeriod);
+        if (fastStart < 0 || slowStart < 0 || fastEMA.Count == 0 || slowEMA.Count == 0)
+        {
+            return null;
+        }
+
+        var start = Math.Max(fastStart, slowStart);
+        var macdSeries = new List<decimal>();
+        for (int idx = start; idx < prices.Count; idx++)
+        {
+            var fastVal = fastEMA[idx - fastStart];
+            var slowVal = slowEMA[idx - slowStart];
+            macdSeries.Add(fastVal - slowVal);
+        }
+
+        if (macdSeries.Count < signalPeriod)
+        {
+            return null;
+        }
+
+        var (_, signalSeries) = CalculateEMASeries(macdSeries, signalPeriod);
+        if (signalSeries.Count == 0)
+        {
+            return null;
+        }
+
+        var macdLine = macdSeries.Last();
+        var signalLine = signalSeries.Last();
+        return new MACDResult
+        {
+            MACD = macdLine,
+            Signal = signalLine,
+            Histogram = macdLine - signalLine
+        };
+    }
+}
+
+public sealed class CachedDecimal
+{
+    public CachedDecimal(decimal value)
+    {
+        Value = value;
+    }
+
+    public decimal Value { get; }
 }

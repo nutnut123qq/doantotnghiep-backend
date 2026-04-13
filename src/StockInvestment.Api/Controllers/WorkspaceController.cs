@@ -12,14 +12,11 @@ namespace StockInvestment.Api.Controllers;
 public class WorkspaceController : ControllerBase
 {
     private readonly IWorkspaceService _workspaceService;
-    private readonly ILogger<WorkspaceController> _logger;
 
     public WorkspaceController(
-        IWorkspaceService workspaceService,
-        ILogger<WorkspaceController> logger)
+        IWorkspaceService workspaceService)
     {
         _workspaceService = workspaceService;
-        _logger = logger;
     }
 
     /// <summary>
@@ -28,22 +25,9 @@ public class WorkspaceController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetWorkspaces()
     {
-        try
-        {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
-            var workspaces = await _workspaceService.GetUserWorkspacesAsync(userId);
-            return Ok(workspaces);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting workspaces");
-            return StatusCode(500, "An error occurred while retrieving workspaces");
-        }
+        var userId = GetRequiredUserId();
+        var workspaces = await _workspaceService.GetUserWorkspacesAsync(userId);
+        return Ok(workspaces);
     }
 
     /// <summary>
@@ -52,27 +36,13 @@ public class WorkspaceController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetWorkspace(Guid id)
     {
-        try
+        var userId = GetRequiredUserId();
+        var workspace = await _workspaceService.GetByIdAsync(id, userId);
+        if (workspace == null)
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
-            var workspace = await _workspaceService.GetByIdAsync(id, userId);
-            if (workspace == null)
-            {
-                return NotFound($"Workspace with ID {id} not found");
-            }
-
-            return Ok(workspace);
+            return NotFound($"Workspace with ID {id} not found");
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting workspace {Id}", id);
-            return StatusCode(500, "An error occurred while retrieving workspace");
-        }
+        return Ok(workspace);
     }
 
     /// <summary>
@@ -81,27 +51,14 @@ public class WorkspaceController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateWorkspace([FromBody] CreateWorkspaceRequest request)
     {
-        try
+        var userId = GetRequiredUserId();
+        if (string.IsNullOrWhiteSpace(request.Name))
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
-            if (string.IsNullOrWhiteSpace(request.Name))
-            {
-                return BadRequest("Workspace name is required");
-            }
-
-            var workspace = await _workspaceService.CreateAsync(request.Name, request.Description, userId);
-            return CreatedAtAction(nameof(GetWorkspace), new { id = workspace.Id }, workspace);
+            return BadRequest("Workspace name is required");
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating workspace");
-            return StatusCode(500, "An error occurred while creating workspace");
-        }
+
+        var workspace = await _workspaceService.CreateAsync(request.Name, request.Description, userId);
+        return CreatedAtAction(nameof(GetWorkspace), new { id = workspace.Id }, workspace);
     }
 
     /// <summary>
@@ -110,29 +67,19 @@ public class WorkspaceController : ControllerBase
     [HttpPut("{id}")]
     public async Task<IActionResult> UpdateWorkspace(Guid id, [FromBody] UpdateWorkspaceRequest request)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             var workspace = await _workspaceService.UpdateAsync(id, request.Name, request.Description, userId);
             return Ok(workspace);
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
+            return Forbid();
         }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating workspace {Id}", id);
-            return StatusCode(500, "An error occurred while updating workspace");
         }
     }
 
@@ -142,29 +89,19 @@ public class WorkspaceController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteWorkspace(Guid id)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             await _workspaceService.DeleteAsync(id, userId);
             return NoContent();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
+            return Forbid();
         }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting workspace {Id}", id);
-            return StatusCode(500, "An error occurred while deleting workspace");
         }
     }
 
@@ -174,29 +111,19 @@ public class WorkspaceController : ControllerBase
     [HttpPost("{id}/members")]
     public async Task<IActionResult> AddMember(Guid id, [FromBody] AddMemberRequest request)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             var member = await _workspaceService.AddMemberAsync(id, request.UserId, userId, request.Role ?? WorkspaceRole.Member);
             return Ok(member);
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
+            return Forbid();
         }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding member to workspace {Id}", id);
-            return StatusCode(500, "An error occurred while adding member");
         }
     }
 
@@ -206,29 +133,19 @@ public class WorkspaceController : ControllerBase
     [HttpDelete("{id}/members/{memberUserId}")]
     public async Task<IActionResult> RemoveMember(Guid id, Guid memberUserId)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             await _workspaceService.RemoveMemberAsync(id, memberUserId, userId);
             return NoContent();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
+            return Forbid();
         }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error removing member from workspace {Id}", id);
-            return StatusCode(500, "An error occurred while removing member");
         }
     }
 
@@ -238,29 +155,19 @@ public class WorkspaceController : ControllerBase
     [HttpPut("{id}/members/{memberUserId}/role")]
     public async Task<IActionResult> UpdateMemberRole(Guid id, Guid memberUserId, [FromBody] UpdateMemberRoleRequest request)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             await _workspaceService.UpdateMemberRoleAsync(id, memberUserId, request.Role, userId);
             return NoContent();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
+            return Forbid();
         }
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating member role in workspace {Id}", id);
-            return StatusCode(500, "An error occurred while updating member role");
         }
     }
 
@@ -270,25 +177,15 @@ public class WorkspaceController : ControllerBase
     [HttpGet("{id}/watchlists")]
     public async Task<IActionResult> GetSharedWatchlists(Guid id)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             var watchlists = await _workspaceService.GetSharedWatchlistsAsync(id, userId);
             return Ok(watchlists);
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting shared watchlists for workspace {Id}", id);
-            return StatusCode(500, "An error occurred while retrieving watchlists");
+            return Forbid();
         }
     }
 
@@ -298,25 +195,15 @@ public class WorkspaceController : ControllerBase
     [HttpPost("{id}/watchlists")]
     public async Task<IActionResult> AddWatchlist(Guid id, [FromBody] AddWatchlistRequest request)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             await _workspaceService.AddWatchlistAsync(id, request.WatchlistId, userId);
             return NoContent();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding watchlist to workspace {Id}", id);
-            return StatusCode(500, "An error occurred while adding watchlist");
+            return Forbid();
         }
     }
 
@@ -326,25 +213,15 @@ public class WorkspaceController : ControllerBase
     [HttpDelete("{id}/watchlists/{watchlistId}")]
     public async Task<IActionResult> RemoveWatchlist(Guid id, Guid watchlistId)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             await _workspaceService.RemoveWatchlistAsync(id, watchlistId, userId);
             return NoContent();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error removing watchlist from workspace {Id}", id);
-            return StatusCode(500, "An error occurred while removing watchlist");
+            return Forbid();
         }
     }
 
@@ -354,25 +231,15 @@ public class WorkspaceController : ControllerBase
     [HttpGet("{id}/layouts")]
     public async Task<IActionResult> GetSharedLayouts(Guid id)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             var layouts = await _workspaceService.GetSharedLayoutsAsync(id, userId);
             return Ok(layouts);
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting shared layouts for workspace {Id}", id);
-            return StatusCode(500, "An error occurred while retrieving layouts");
+            return Forbid();
         }
     }
 
@@ -382,25 +249,15 @@ public class WorkspaceController : ControllerBase
     [HttpPost("{id}/layouts")]
     public async Task<IActionResult> AddLayout(Guid id, [FromBody] AddLayoutRequest request)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             await _workspaceService.AddLayoutAsync(id, request.LayoutId, userId);
             return NoContent();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding layout to workspace {Id}", id);
-            return StatusCode(500, "An error occurred while adding layout");
+            return Forbid();
         }
     }
 
@@ -410,97 +267,27 @@ public class WorkspaceController : ControllerBase
     [HttpDelete("{id}/layouts/{layoutId}")]
     public async Task<IActionResult> RemoveLayout(Guid id, Guid layoutId)
     {
+        var userId = GetRequiredUserId();
         try
         {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
             await _workspaceService.RemoveLayoutAsync(id, layoutId, userId);
             return NoContent();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            return Forbid(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error removing layout from workspace {Id}", id);
-            return StatusCode(500, "An error occurred while removing layout");
+            return Forbid();
         }
     }
 
-    /// <summary>
-    /// Get messages in workspace
-    /// </summary>
-    [HttpGet("{id}/messages")]
-    public async Task<IActionResult> GetMessages(Guid id, [FromQuery] int limit = 50)
-    {
-        try
-        {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
-            var messages = await _workspaceService.GetMessagesAsync(id, userId, limit);
-            return Ok(messages);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Forbid(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting messages for workspace {Id}", id);
-            return StatusCode(500, "An error occurred while retrieving messages");
-        }
-    }
-
-    /// <summary>
-    /// Send message to workspace
-    /// </summary>
-    [HttpPost("{id}/messages")]
-    public async Task<IActionResult> SendMessage(Guid id, [FromBody] SendMessageRequest request)
-    {
-        try
-        {
-            var userId = GetCurrentUserId();
-            if (userId == Guid.Empty)
-            {
-                return Unauthorized("User ID not found in token");
-            }
-
-            if (string.IsNullOrWhiteSpace(request.Content))
-            {
-                return BadRequest("Message content is required");
-            }
-
-            var message = await _workspaceService.SendMessageAsync(id, request.Content, userId);
-            return Ok(message);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Forbid(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error sending message to workspace {Id}", id);
-            return StatusCode(500, "An error occurred while sending message");
-        }
-    }
-
-    private Guid GetCurrentUserId()
+    private Guid GetRequiredUserId()
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (Guid.TryParse(userIdClaim, out var userId))
         {
             return userId;
         }
-        return Guid.Empty;
+
+        throw new UnauthorizedAccessException("User ID not found in token");
     }
 }
 
@@ -538,7 +325,3 @@ public class AddLayoutRequest
     public Guid LayoutId { get; set; }
 }
 
-public class SendMessageRequest
-{
-    public string Content { get; set; } = null!;
-}

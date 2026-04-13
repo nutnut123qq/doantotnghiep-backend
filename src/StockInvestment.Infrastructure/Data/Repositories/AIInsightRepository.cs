@@ -79,4 +79,49 @@ public class AIInsightRepository : Repository<AIInsight>, IAIInsightRepository
             .Where(i => i.DismissedAt != null && i.DismissedAt < cutoffDate)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task<DateTime?> GetLatestGeneratedAtByTickerAsync(Guid tickerId, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Where(i => i.TickerId == tickerId && i.DismissedAt == null)
+            .OrderByDescending(i => i.GeneratedAt)
+            .Select(i => (DateTime?)i.GeneratedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<IEnumerable<AIInsight>> GetGlobalLatestInsightsAsync(
+        InsightType? type = null,
+        string? symbol = null,
+        CancellationToken cancellationToken = default)
+    {
+        var baseQuery = _dbSet
+            .Include(i => i.Ticker)
+            .Where(i => i.DismissedAt == null)
+            .AsQueryable();
+
+        if (type.HasValue)
+        {
+            baseQuery = baseQuery.Where(i => i.Type == type.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(symbol))
+        {
+            baseQuery = baseQuery.Where(i => i.Ticker.Symbol == symbol.ToUpper());
+        }
+
+        var latestIds = await baseQuery
+            .GroupBy(i => new { i.TickerId, i.Type })
+            .Select(g => g
+                .OrderByDescending(x => x.GeneratedAt)
+                .Select(x => x.Id)
+                .First())
+            .ToListAsync(cancellationToken);
+
+        return await _dbSet
+            .Include(i => i.Ticker)
+            .Where(i => latestIds.Contains(i.Id))
+            .OrderByDescending(i => i.GeneratedAt)
+            .ThenByDescending(i => i.Confidence)
+            .ToListAsync(cancellationToken);
+    }
 }

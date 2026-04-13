@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Constants;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Domain.Enums;
+using System.Diagnostics;
 
 namespace StockInvestment.Infrastructure.Services;
 
@@ -27,130 +29,138 @@ public class StockDataService : IStockDataService
         _cacheService = cacheService;
     }
 
-    public async Task<IEnumerable<StockTicker>> GetTickersAsync(string? exchange = null, string? index = null, string? industry = null, Guid? watchlistId = null)
+    public async Task<IEnumerable<StockTicker>> GetTickersAsync(
+        string? exchange = null,
+        string? index = null,
+        string? industry = null,
+        Guid? watchlistId = null,
+        string? requestId = null)
     {
+        var totalSw = Stopwatch.StartNew();
+        var trace = string.IsNullOrWhiteSpace(requestId) ? "n/a" : requestId;
         try
         {
+            _logger.LogInformation(
+                "GetTickersAsync started requestId={RequestId} exchange={Exchange} index={Index} industry={Industry} watchlistId={WatchlistId}",
+                trace,
+                exchange ?? "null",
+                index ?? "null",
+                industry ?? "null",
+                watchlistId?.ToString() ?? "null");
+
             // Nếu có watchlistId, lấy từ database
             if (watchlistId.HasValue)
             {
+                var watchlistSw = Stopwatch.StartNew();
                 var watchlist = await _watchlistRepository.GetByIdWithTickersAsync(watchlistId.Value);
+                _logger.LogInformation(
+                    "Phase watchlist lookup completed in {ElapsedMs}ms requestId={RequestId} found={Found}",
+                    watchlistSw.ElapsedMilliseconds,
+                    trace,
+                    watchlist != null);
 
                 if (watchlist != null)
                 {
-                    // Nếu có cả index filter, lấy intersection
+                    var wl = watchlist.Tickers.Where(t => Vn30Universe.Contains(t.Symbol)).ToList();
+                    // Nếu có cả index filter, lấy intersection (chỉ VN30 được hỗ trợ)
                     if (!string.IsNullOrEmpty(index))
                     {
-                        var indexSymbols = IndexConstituentProvider.GetSymbols(index);
-                        var filteredTickers = watchlist.Tickers
-                            .Where(t => indexSymbols.Contains(t.Symbol, StringComparer.OrdinalIgnoreCase))
+                        var wlIndexSymbols = IndexConstituentProvider.GetSymbols(index);
+                        var filteredTickers = wl
+                            .Where(t => wlIndexSymbols.Contains(t.Symbol, StringComparer.OrdinalIgnoreCase))
                             .ToList();
+                        _logger.LogInformation(
+                            "GetTickersAsync returning watchlist+index result count={Count} in {ElapsedMs}ms requestId={RequestId}",
+                            filteredTickers.Count,
+                            totalSw.ElapsedMilliseconds,
+                            trace);
                         return filteredTickers;
                     }
-                    
-                    return watchlist.Tickers;
+
+                    _logger.LogInformation(
+                        "GetTickersAsync returning watchlist result count={Count} in {ElapsedMs}ms requestId={RequestId}",
+                        wl.Count,
+                        totalSw.ElapsedMilliseconds,
+                        trace);
+                    return wl;
                 }
             }
 
-            // Lấy từ cache hoặc VNStock API - include index in cache key
-            var cacheKey = $"tickers_{exchange}_{index}_{industry}";
+            // Board mặc định VN30 khi không chỉ định index (cùng cache key)
+            var indexCacheSegment = string.IsNullOrWhiteSpace(index) ? "VN30" : index.Trim();
+            var cacheKey = $"tickers_vnd_{exchange}_{indexCacheSegment}_{industry}";
+            var cacheSw = Stopwatch.StartNew();
             var cachedTickers = await _cacheService.GetAsync<List<StockTicker>>(cacheKey);
+            _logger.LogInformation(
+                "Phase cache lookup completed in {ElapsedMs}ms requestId={RequestId} hit={Hit}",
+                cacheSw.ElapsedMilliseconds,
+                trace,
+                cachedTickers != null);
 
             if (cachedTickers != null)
             {
-                return cachedTickers;
+                // Bỏ cache nếu toàn bộ mã không có giá hợp lệ (thường do lỗi deserialize/quote cũ).
+                if (cachedTickers.Count > 0 && cachedTickers.TrueForAll(t => t.CurrentPrice <= 0))
+                {
+                    _logger.LogWarning(
+                        "Discarding cached trading board: no valid prices requestId={RequestId} key={CacheKey}",
+                        trace,
+                        cacheKey);
+                    await _cacheService.RemoveAsync(cacheKey);
+                }
+                else
+                {
+                    var filteredCache = cachedTickers.Where(t => Vn30Universe.Contains(t.Symbol)).ToList();
+                    _logger.LogInformation(
+                        "GetTickersAsync returning cache result count={Count} in {ElapsedMs}ms requestId={RequestId}",
+                        filteredCache.Count,
+                        totalSw.ElapsedMilliseconds,
+                        trace);
+                    return filteredCache;
+                }
             }
 
-            // Nếu có index filter, lấy danh sách theo index
-            if (!string.IsNullOrEmpty(index))
+            if (!string.IsNullOrWhiteSpace(index)
+                && !string.Equals(index.Trim(), "VN30", StringComparison.OrdinalIgnoreCase))
             {
-                var indexSymbols = IndexConstituentProvider.GetSymbols(index);
-                if (!indexSymbols.Any())
-                {
-                    _logger.LogWarning("No symbols found for index {Index}", index);
-                    return Enumerable.Empty<StockTicker>();
-                }
-
-                // Fetch quotes cho các symbols trong index
-                var indexQuotes = await _vnStockService.GetQuotesAsync(indexSymbols);
-                var indexTickers = indexQuotes.ToList();
-
-                // Filter thêm theo exchange nếu có
-                if (!string.IsNullOrEmpty(exchange))
-                {
-                    indexTickers = indexTickers
-                        .Where(t => t.Exchange.ToString().Equals(exchange, StringComparison.OrdinalIgnoreCase))
-                        .ToList();
-                }
-
-                // Cache 2 phút
-                await _cacheService.SetAsync(cacheKey, indexTickers, TimeSpan.FromMinutes(2));
-
-                _logger.LogInformation("Fetched {Count} tickers for index {Index}", indexTickers.Count, index);
-                return indexTickers;
+                _logger.LogWarning("Unsupported index {Index}; only VN30 is allowed", index);
+                return Enumerable.Empty<StockTicker>();
             }
 
-            // Ưu tiên lấy từ database trước (nếu có dữ liệu đã được cập nhật)
+            // TradingBoard is backend-driven:
+            // always serve from cache/database populated by StockPriceUpdateJob,
+            // never trigger VNStock fetch from request path.
+            var dbSw = Stopwatch.StartNew();
             var dbTickers = await _stockTickerRepository.GetTickersAsync(exchange, null, industry);
-            var dbTickersList = dbTickers.ToList();
+            var dbTickersList = dbTickers.Where(t => Vn30Universe.Contains(t.Symbol)).ToList();
+            _logger.LogInformation(
+                "Phase db lookup completed in {ElapsedMs}ms requestId={RequestId} count={Count}",
+                dbSw.ElapsedMilliseconds,
+                trace,
+                dbTickersList.Count);
 
-            // Nếu có dữ liệu trong DB và đã được cập nhật gần đây (trong vòng 10 phút), dùng dữ liệu từ DB
-            if (dbTickersList.Any() && dbTickersList.Any(t => t.LastUpdated > DateTime.UtcNow.AddMinutes(-10)))
+            if (dbTickersList.Any())
             {
-                var result = dbTickersList.Where(t => t.LastUpdated > DateTime.UtcNow.AddMinutes(-10)).ToList();
-                
                 // Cache 2 phút
-                await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(2));
-                
-                return result;
+                await _cacheService.SetAsync(cacheKey, dbTickersList, TimeSpan.FromMinutes(2));
+
+                _logger.LogInformation(
+                    "GetTickersAsync returning db result count={Count} in {ElapsedMs}ms requestId={RequestId}",
+                    dbTickersList.Count,
+                    totalSw.ElapsedMilliseconds,
+                    trace);
+                return dbTickersList;
             }
 
-            // Nếu không có trong DB hoặc dữ liệu cũ, lấy từ VNStock API
-            // Lấy danh sách symbols
-            var symbols = await _vnStockService.GetAllSymbolsAsync(exchange);
-            var symbolsList = symbols.ToList();
-
-            // Filter theo industry nếu có
-            if (!string.IsNullOrEmpty(industry))
-            {
-                symbolsList = symbolsList.Where(t => t.Industry?.Contains(industry, StringComparison.OrdinalIgnoreCase) == true).ToList();
-            }
-
-            // Giới hạn số lượng để tránh quá chậm (lấy tối đa 100 symbols đầu tiên)
-            var limitedSymbols = symbolsList.Take(100).Select(s => s.Symbol).ToList();
-
-            // Lấy giá (quotes) cho các symbols này
-            var quotes = await _vnStockService.GetQuotesAsync(limitedSymbols);
-            var quotesList = quotes.ToList();
-
-            // Merge với thông tin từ symbols (để có đầy đủ thông tin)
-            var tickersList = quotesList.Select(quote =>
-            {
-                var symbolInfo = symbolsList.FirstOrDefault(s => s.Symbol == quote.Symbol);
-                if (symbolInfo != null)
-                {
-                    // Cập nhật thông tin từ symbol nếu quote thiếu
-                    quote.Name = symbolInfo.Name ?? quote.Name;
-                    quote.Exchange = symbolInfo.Exchange;
-                    quote.Industry = symbolInfo.Industry ?? quote.Industry;
-                }
-                return quote;
-            }).ToList();
-
-            // Nếu không lấy được quotes, fallback về symbols (nhưng sẽ có giá = 0)
-            if (!tickersList.Any() && symbolsList.Any())
-            {
-                tickersList = symbolsList.Take(100).ToList();
-            }
-
-            // Cache 2 phút (ngắn hơn để cập nhật giá thường xuyên hơn)
-            await _cacheService.SetAsync(cacheKey, tickersList, TimeSpan.FromMinutes(2));
-
-            return tickersList;
+            _logger.LogInformation(
+                "GetTickersAsync returning empty result (no db/cache data yet) in {ElapsedMs}ms requestId={RequestId}",
+                totalSw.ElapsedMilliseconds,
+                trace);
+            return Enumerable.Empty<StockTicker>();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching tickers");
+            _logger.LogError(ex, "Error fetching tickers requestId={RequestId} after {ElapsedMs}ms", trace, totalSw.ElapsedMilliseconds);
             // Fallback to mock data
             return GenerateMockTickers();
         }
@@ -160,19 +170,36 @@ public class StockDataService : IStockDataService
     {
         try
         {
-            var cacheKey = $"ticker_{symbol}";
+            var normalizedSymbol = symbol.Trim().ToUpperInvariant();
+
+            if (!Vn30Universe.Contains(normalizedSymbol))
+            {
+                return await _stockTickerRepository.GetBySymbolAsync(normalizedSymbol);
+            }
+
+            var cacheKey = $"ticker_vnd_{normalizedSymbol}";
             var cachedTicker = await _cacheService.GetAsync<StockTicker>(cacheKey);
 
             if (cachedTicker != null)
             {
-                return cachedTicker;
+                return NormalizeTickerUnitIfNeeded(cachedTicker);
             }
 
-            var ticker = await _vnStockService.GetQuoteAsync(symbol);
+            // Prefer local DB snapshot first to avoid blocking user requests
+            // when the external VNStock API is slow or temporarily unavailable.
+            var dbTicker = await _stockTickerRepository.GetBySymbolAsync(normalizedSymbol);
+            if (dbTicker != null)
+            {
+                var normalizedDbTicker = NormalizeTickerUnitIfNeeded(dbTicker);
+                await _cacheService.SetAsync(cacheKey, normalizedDbTicker, TimeSpan.FromMinutes(1));
+                return normalizedDbTicker;
+            }
+
+            var ticker = await _vnStockService.GetQuoteAsync(normalizedSymbol);
 
             if (ticker != null)
             {
-                // Cache 1 phút
+                ticker = NormalizeTickerUnitIfNeeded(ticker);
                 await _cacheService.SetAsync(cacheKey, ticker, TimeSpan.FromMinutes(1));
             }
 
@@ -218,10 +245,9 @@ public class StockDataService : IStockDataService
             // Add tickers found in database
             foreach (var kvp in dbTickers)
             {
-                result[kvp.Key] = kvp.Value;
+                result[kvp.Key] = NormalizeTickerUnitIfNeeded(kvp.Value);
             }
 
-            // Find missing symbols
             foreach (var symbol in symbolsList)
             {
                 if (!result.ContainsKey(symbol))
@@ -230,32 +256,32 @@ public class StockDataService : IStockDataService
                 }
             }
 
-            // For missing symbols, try to get from VNStock API (batch)
-            if (missingSymbols.Any())
+            var missingVn30 = missingSymbols.Where(Vn30Universe.Contains).ToList();
+
+            if (missingVn30.Any())
             {
                 try
                 {
-                    var quotes = await _vnStockService.GetQuotesAsync(missingSymbols);
+                    var quotes = await _vnStockService.GetQuotesAsync(missingVn30);
                     foreach (var quote in quotes)
                     {
                         if (quote != null)
                         {
-                            result[quote.Symbol] = quote;
+                            result[quote.Symbol] = NormalizeTickerUnitIfNeeded(quote);
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Error fetching quotes for missing symbols, will use individual lookups");
-                    // Fallback to individual lookups for remaining symbols
-                    foreach (var symbol in missingSymbols)
+                    _logger.LogWarning(ex, "Error fetching quotes for missing VN30 symbols, will use individual lookups");
+                    foreach (var sym in missingVn30)
                     {
-                        if (!result.ContainsKey(symbol))
+                        if (!result.ContainsKey(sym))
                         {
-                            var ticker = await GetTickerBySymbolAsync(symbol);
+                            var ticker = await GetTickerBySymbolAsync(sym);
                             if (ticker != null)
                             {
-                                result[symbol] = ticker;
+                                result[sym] = ticker;
                             }
                         }
                     }
@@ -303,6 +329,38 @@ public class StockDataService : IStockDataService
         }
 
         return tickers;
+    }
+
+    private StockTicker NormalizeTickerUnitIfNeeded(StockTicker ticker)
+    {
+        if (ticker.CurrentPrice <= 0 || ticker.CurrentPrice >= 1000m)
+        {
+            return ticker;
+        }
+
+        var normalized = new StockTicker
+        {
+            Id = ticker.Id,
+            Symbol = ticker.Symbol,
+            Name = ticker.Name,
+            Exchange = ticker.Exchange,
+            Industry = ticker.Industry,
+            CurrentPrice = ticker.CurrentPrice * 1000m,
+            PreviousClose = ticker.PreviousClose.HasValue ? ticker.PreviousClose * 1000m : null,
+            Change = ticker.Change.HasValue ? ticker.Change * 1000m : null,
+            ChangePercent = ticker.ChangePercent,
+            Volume = ticker.Volume,
+            Value = ticker.Value.HasValue ? ticker.Value * 1000m : null,
+            LastUpdated = ticker.LastUpdated
+        };
+
+        _logger.LogWarning(
+            "Detected legacy thousand-VND ticker unit for {Symbol}. Auto-normalized current price from {CurrentPrice} to {NormalizedPrice}",
+            ticker.Symbol,
+            ticker.CurrentPrice,
+            normalized.CurrentPrice);
+
+        return normalized;
     }
 }
 

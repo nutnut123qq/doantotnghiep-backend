@@ -7,12 +7,13 @@ namespace StockInvestment.Infrastructure.Services;
 /// </summary>
 public class CacheKeyGenerator : StockInvestment.Application.Interfaces.ICacheKeyGenerator
 {
-    private const string CacheVersion = "v1";
+    private const string CacheVersion = "v2";
     private const string InsightsPrefix = "insights";
     private const string MarketSentimentPrefix = "market_sentiment";
     private const string OHLCVPrefix = "ohlcv";
     private const string QuotePrefix = "quote";
     private const string ForecastPrefix = "forecast";
+    private const string ForecastLangGraphPrefix = "forecast_lg";
     private const string PortfolioPrefix = "portfolio";
     private const string TickerPrefix = "ticker";
     
@@ -68,6 +69,11 @@ public class CacheKeyGenerator : StockInvestment.Application.Interfaces.ICacheKe
     public string GenerateForecastKey(string symbol, string timeHorizon)
     {
         return $"{_environmentPrefix}:{CacheVersion}:{ForecastPrefix}:{symbol.ToUpperInvariant()}:{timeHorizon.ToLowerInvariant()}";
+    }
+
+    public string GenerateLangGraphForecastKey(string symbol, string timeHorizon)
+    {
+        return $"{_environmentPrefix}:{CacheVersion}:{ForecastLangGraphPrefix}:{symbol.ToUpperInvariant()}:{timeHorizon.ToLowerInvariant()}";
     }
 
     public string GeneratePortfolioHoldingsKey(Guid userId)

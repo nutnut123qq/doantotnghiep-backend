@@ -34,6 +34,12 @@ public class ToggleAlertHandler : IRequestHandler<ToggleAlertCommand, ToggleAler
         }
 
         alert.IsActive = request.IsActive;
+        // Re-arm one-shot alerts: TryMarkAsTriggeredAsync requires TriggeredAt IS NULL.
+        if (request.IsActive)
+        {
+            alert.TriggeredAt = null;
+        }
+
         await _unitOfWork.Alerts.UpdateAsync(alert);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -43,7 +49,8 @@ public class ToggleAlertHandler : IRequestHandler<ToggleAlertCommand, ToggleAler
         return new ToggleAlertResponse
         {
             Id = alert.Id,
-            IsActive = alert.IsActive
+            IsActive = alert.IsActive,
+            TriggeredAt = alert.TriggeredAt
         };
     }
 }

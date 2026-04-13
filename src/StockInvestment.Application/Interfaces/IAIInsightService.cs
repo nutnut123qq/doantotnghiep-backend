@@ -1,5 +1,6 @@
 using StockInvestment.Domain.Entities;
 using StockInvestment.Domain.Enums;
+using StockInvestment.Application.DTOs.AIInsights;
 
 namespace StockInvestment.Application.Interfaces;
 
@@ -29,6 +30,13 @@ public interface IAIInsightService
     Task<MarketSentiment> GetMarketSentimentAsync(CancellationToken cancellationToken = default);
 
     Task CleanupOldDismissedInsightsAsync(int daysOld = 7, CancellationToken cancellationToken = default);
+    Task<InsightAccuracyMetricsDto> EvaluateAccuracyAsync(int maxInsights = 500, CancellationToken cancellationToken = default);
+    Task<int> GenerateGlobalInsightsHybridAsync(
+        IEnumerable<Guid> scheduledTickerIds,
+        int maxGeneratePerRun,
+        TimeSpan minInsightTtl,
+        CancellationToken cancellationToken = default);
+    Task EnqueueTickerForRefreshAsync(Guid tickerId, string reason, CancellationToken cancellationToken = default);
 }
 
 public class MarketSentiment

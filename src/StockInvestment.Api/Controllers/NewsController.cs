@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using StockInvestment.Api.Contracts.Responses;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Enums;
 using StockInvestment.Infrastructure.Messaging;
@@ -91,6 +92,39 @@ public class NewsController : ControllerBase
         return Ok(summaryResult);
     }
 
+    /// <summary>
+    /// Ask a question based on recent news (RAG). Optional symbol narrows context to that ticker and related headlines.
+    /// </summary>
+    [HttpPost("qa")]
+    [Authorize]
+    [ProducesResponseType(typeof(AskQuestionResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> AskNewsQuestion([FromBody] AskNewsQuestionRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Question))
+            return BadRequest("Question is required");
+
+        var symbol = string.IsNullOrWhiteSpace(request.Symbol) ? null : request.Symbol;
+        var result = await _newsService.AskQuestionAsync(symbol, request.Question, request.Days, request.TopK);
+        var sources = result.Sources
+            .Select(s => new QASourceResponse
+            {
+                Title = string.IsNullOrWhiteSpace(s.Title) ? "News source" : s.Title,
+                Url = s.SourceUrl,
+                SourceType = string.IsNullOrWhiteSpace(s.Source) ? "news" : s.Source,
+                PublishedAt = null
+            })
+            .ToList();
+
+        var response = new AskQuestionResponse
+        {
+            Question = request.Question,
+            Answer = result.Answer,
+            Sources = sources
+        };
+
+        return Ok(response);
+    }
+
     private Sentiment? ParseSentiment(string sentimentString)
     {
         if (string.IsNullOrWhiteSpace(sentimentString))
@@ -104,5 +138,13 @@ public class NewsController : ControllerBase
             _ => Sentiment.Neutral
         };
     }
+}
+
+public class AskNewsQuestionRequest
+{
+    public string? Symbol { get; set; }
+    public string Question { get; set; } = string.Empty;
+    public int Days { get; set; } = 7;
+    public int TopK { get; set; } = 6;
 }
 

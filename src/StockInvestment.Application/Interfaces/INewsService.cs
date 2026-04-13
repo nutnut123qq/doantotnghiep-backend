@@ -1,4 +1,5 @@
 using StockInvestment.Application.DTOs.AnalysisReports;
+using StockInvestment.Application.Contracts.AI;
 using StockInvestment.Domain.Entities;
 
 namespace StockInvestment.Application.Interfaces;
@@ -16,4 +17,6 @@ public interface INewsService
     /// Get all existing news URLs as a HashSet for efficient duplicate checking
     /// </summary>
     Task<HashSet<string>> GetExistingUrlsAsync();
+    Task<HashSet<string>> GetExistingFingerprintsAsync();
+    Task<QuestionAnswerResult> AskQuestionAsync(string? symbol, string question, int days = 7, int topK = 6);
 }

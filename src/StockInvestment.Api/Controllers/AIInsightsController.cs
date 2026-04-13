@@ -44,7 +44,7 @@ public class AIInsightsController : ControllerBase
     {
         // Check cache
         var cacheKey = _cacheKeyGenerator.GenerateInsightsKey(type, symbol, includeDismissed);
-        var cachedInsights = await _cacheService.GetAsync<List<object>>(cacheKey);
+        var cachedInsights = await _cacheService.GetAsync<List<AIInsightDto>>(cacheKey);
         if (cachedInsights != null)
         {
             return Ok(cachedInsights);
@@ -73,22 +73,40 @@ public class AIInsightsController : ControllerBase
     /// <summary>
     /// Map AIInsight entity to DTO
     /// </summary>
-    private static object MapToDto(Domain.Entities.AIInsight i)
+    private static AIInsightDto MapToDto(Domain.Entities.AIInsight i)
     {
-        return new
+        var reasoning = JsonSerializer.Deserialize<List<string>>(i.Reasoning) ?? new List<string>();
+        var evidence = reasoning
+            .Where(r => r.StartsWith("[EVIDENCE] ", StringComparison.OrdinalIgnoreCase))
+            .Select(r => r[11..].Trim())
+            .ToList();
+        var cleanReasoning = reasoning
+            .Where(r => !r.StartsWith("[EVIDENCE] ", StringComparison.OrdinalIgnoreCase)
+                     && !r.StartsWith("[META] ", StringComparison.OrdinalIgnoreCase)
+                     && !r.StartsWith("[QUALITY] ", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var metadata = ParseMetadata(reasoning);
+        var quality = ParseQuality(reasoning);
+
+        return new AIInsightDto
         {
-            id = i.Id,
-            symbol = i.Ticker.Symbol,
-            name = i.Ticker.Name,
-            type = i.Type.ToString(),
-            title = i.Title,
-            description = i.Description,
-            confidence = i.Confidence,
-            reasoning = JsonSerializer.Deserialize<List<string>>(i.Reasoning) ?? new List<string>(),
-            targetPrice = i.TargetPrice,
-            stopLoss = i.StopLoss,
-            timestamp = i.GeneratedAt,
-            generatedAt = i.GeneratedAt
+            Id = i.Id,
+            Symbol = i.Ticker.Symbol,
+            Name = i.Ticker.Name,
+            Type = i.Type.ToString(),
+            Title = i.Title,
+            Description = i.Description,
+            Confidence = i.Confidence,
+            Reasoning = cleanReasoning,
+            TargetPrice = i.TargetPrice,
+            StopLoss = i.StopLoss,
+            Timestamp = i.GeneratedAt,
+            GeneratedAt = i.GeneratedAt,
+            QualityStatus = quality.Status,
+            QualityScore = quality.Score,
+            Evidence = evidence,
+            QualityMetadata = metadata
         };
     }
 
@@ -134,6 +152,7 @@ public class AIInsightsController : ControllerBase
     /// Dismiss an insight (mark as read/irrelevant)
     /// </summary>
     [HttpPost("{id}/dismiss")]
+    [Authorize(Policy = "Admin")]
     public async Task<IActionResult> DismissInsight(Guid id)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -155,6 +174,7 @@ public class AIInsightsController : ControllerBase
     /// Manually trigger insight generation for a ticker
     /// </summary>
     [HttpPost("generate")]
+    [Authorize(Policy = "Admin")]
     public async Task<IActionResult> GenerateInsight([FromBody] GenerateInsightRequest request)
     {
         try
@@ -180,22 +200,7 @@ public class AIInsightsController : ControllerBase
             await _cacheService.RemoveByPatternAsync(_cacheKeyGenerator.GeneratePattern("insights"));
             await _cacheService.RemoveAsync(_cacheKeyGenerator.GenerateMarketSentimentKey());
 
-            var result = new
-            {
-                id = insight.Id,
-                symbol = insight.Ticker.Symbol,
-                name = insight.Ticker.Name,
-                type = insight.Type.ToString(),
-                title = insight.Title,
-                description = insight.Description,
-                confidence = insight.Confidence,
-                reasoning = JsonSerializer.Deserialize<List<string>>(insight.Reasoning) ?? new List<string>(),
-                targetPrice = insight.TargetPrice,
-                stopLoss = insight.StopLoss,
-                generatedAt = insight.GeneratedAt
-            };
-
-            return Ok(result);
+            return Ok(MapToDto(insight));
         }
         catch (HttpRequestException httpEx)
         {
@@ -238,5 +243,68 @@ public class AIInsightsController : ControllerBase
                 details = "Có thể do: AI service không chạy, lỗi kết nối, hoặc lỗi xử lý dữ liệu"
             });
         }
+    }
+
+    [HttpGet("metrics/accuracy")]
+    public async Task<IActionResult> GetAccuracyMetrics([FromQuery] int maxInsights = 500)
+    {
+        var metrics = await _insightService.EvaluateAccuracyAsync(maxInsights);
+        return Ok(metrics);
+    }
+
+    private static Dictionary<string, string> ParseMetadata(IEnumerable<string> reasoning)
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in reasoning)
+        {
+            if (!line.StartsWith("[META] ", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var payload = line[7..];
+            var separator = payload.IndexOf('=');
+            if (separator <= 0 || separator == payload.Length - 1)
+            {
+                continue;
+            }
+
+            metadata[payload[..separator].Trim()] = payload[(separator + 1)..].Trim();
+        }
+
+        return metadata;
+    }
+
+    private static (string Status, int Score) ParseQuality(IEnumerable<string> reasoning)
+    {
+        var qualityLine = reasoning.LastOrDefault(r => r.StartsWith("[QUALITY] ", StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(qualityLine))
+        {
+            return ("needs_review", 0);
+        }
+
+        var payload = qualityLine[10..];
+        var tokens = payload.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var status = "needs_review";
+        var score = 0;
+        foreach (var token in tokens)
+        {
+            var kv = token.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (kv.Length != 2)
+            {
+                continue;
+            }
+
+            if (kv[0].Equals("status", StringComparison.OrdinalIgnoreCase))
+            {
+                status = kv[1];
+            }
+            else if (kv[0].Equals("score", StringComparison.OrdinalIgnoreCase) && int.TryParse(kv[1], out var parsedScore))
+            {
+                score = parsedScore;
+            }
+        }
+
+        return (status, score);
     }
 }

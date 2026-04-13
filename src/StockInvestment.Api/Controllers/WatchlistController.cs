@@ -207,4 +207,3 @@ public class UpdateWatchlistRequest
 {
     public string Name { get; set; } = string.Empty;
 }
-

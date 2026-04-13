@@ -1,7 +1,11 @@
+using System.Net.Http;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Api.Contracts.Responses;
+using StockInvestment.Domain.Exceptions;
+using StockInvestment.Infrastructure.Data;
 
 namespace StockInvestment.Api.Controllers;
 
@@ -11,17 +15,14 @@ namespace StockInvestment.Api.Controllers;
 public class FinancialReportController : ControllerBase
 {
     private readonly IFinancialReportService _reportService;
-    private readonly IFinancialReportCrawlerService _crawlerService;
-    private readonly ILogger<FinancialReportController> _logger;
+    private readonly ApplicationDbContext _context;
 
     public FinancialReportController(
         IFinancialReportService reportService,
-        IFinancialReportCrawlerService crawlerService,
-        ILogger<FinancialReportController> logger)
+        ApplicationDbContext context)
     {
         _reportService = reportService;
-        _crawlerService = crawlerService;
-        _logger = logger;
+        _context = context;
     }
 
     /// <summary>
@@ -30,16 +31,8 @@ public class FinancialReportController : ControllerBase
     [HttpGet("ticker/{tickerId}")]
     public async Task<IActionResult> GetByTicker(Guid tickerId)
     {
-        try
-        {
-            var reports = await _reportService.GetReportsByTickerAsync(tickerId);
-            return Ok(reports);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting reports for ticker {TickerId}", tickerId);
-            return StatusCode(500, "Error fetching financial reports");
-        }
+        var reports = await _reportService.GetReportsByTickerAsync(tickerId);
+        return Ok(reports);
     }
 
     /// <summary>
@@ -48,16 +41,8 @@ public class FinancialReportController : ControllerBase
     [HttpGet("symbol/{symbol}")]
     public async Task<IActionResult> GetBySymbol(string symbol)
     {
-        try
-        {
-            var reports = await _reportService.GetReportsBySymbolAsync(symbol);
-            return Ok(reports);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting reports for symbol {Symbol}", symbol);
-            return StatusCode(500, "Error fetching financial reports");
-        }
+        var reports = await _reportService.GetReportsBySymbolAsync(symbol);
+        return Ok(reports);
     }
 
     /// <summary>
@@ -66,20 +51,12 @@ public class FinancialReportController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetById(Guid id)
     {
-        try
+        var report = await _reportService.GetReportByIdAsync(id);
+        if (report == null)
         {
-            var report = await _reportService.GetReportByIdAsync(id);
-            if (report == null)
-            {
-                return NotFound();
-            }
-            return Ok(report);
+            return NotFound();
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting report {Id}", id);
-            return StatusCode(500, "Error fetching financial report");
-        }
+        return Ok(report);
     }
 
     /// <summary>
@@ -88,25 +65,15 @@ public class FinancialReportController : ControllerBase
     [HttpPost("crawl/{symbol}")]
     public async Task<IActionResult> CrawlReports(string symbol, [FromQuery] int maxReports = 10)
     {
-        try
+        var normalizedSymbol = symbol.ToUpperInvariant();
+        var ticker = await _context.StockTickers.FirstOrDefaultAsync(t => t.Symbol == normalizedSymbol);
+        if (ticker == null)
         {
-            var reports = await _crawlerService.CrawlReportsBySymbolAsync(symbol, maxReports);
-            var reportsList = reports.ToList();
-
-            if (reportsList.Any())
-            {
-                // Note: We need to set TickerId before saving
-                // This would require looking up the ticker first
-                _logger.LogInformation("Crawled {Count} reports for {Symbol}", reportsList.Count, symbol);
-            }
-
-            return Ok(new { symbol, count = reportsList.Count, reports = reportsList });
+            return NotFound($"Ticker {normalizedSymbol} not found");
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error crawling reports for {Symbol}", symbol);
-            return StatusCode(500, "Error crawling financial reports");
-        }
+
+        var reportsList = (await _reportService.CrawlAndPersistReportsForSymbolAsync(normalizedSymbol, maxReports)).ToList();
+        return Ok(new { symbol, count = reportsList.Count, reports = reportsList });
     }
 
     /// <summary>
@@ -116,34 +83,60 @@ public class FinancialReportController : ControllerBase
     [ProducesResponseType(typeof(AskQuestionResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> AskQuestion(Guid id, [FromBody] AskQuestionRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.Question))
+        {
+            return BadRequest("Question is required");
+        }
+
         try
         {
-            if (string.IsNullOrWhiteSpace(request.Question))
-            {
-                return BadRequest("Question is required");
-            }
-
             var result = await _reportService.AskQuestionAsync(id, request.Question);
-            
-            // Map SourceObject to string (sourceUrl or title)
             var sources = result.Sources
-                .Select(s => !string.IsNullOrEmpty(s.SourceUrl) ? s.SourceUrl : s.Title)
-                .Where(s => !string.IsNullOrEmpty(s))
+                .Select(s => new QASourceResponse
+                {
+                    Title = string.IsNullOrWhiteSpace(s.Title) ? "Financial report source" : s.Title,
+                    Url = s.SourceUrl,
+                    SourceType = string.IsNullOrWhiteSpace(s.Source) ? "financial_report" : s.Source,
+                    PublishedAt = null
+                })
                 .ToList();
-            
+
             var response = new AskQuestionResponse
             {
                 Question = request.Question,
                 Answer = result.Answer,
                 Sources = sources
             };
-            
+
             return Ok(response);
         }
-        catch (Exception ex)
+        catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "Error answering question for report {Id}", id);
-            return StatusCode(500, "Error processing question");
+            // PostAsJsonAsync can throw for connection failures; HandleHttpErrorAsync throws when Python returns an HTTP error body.
+            var fromAiHttp = ex.Message.StartsWith("AI service returned", StringComparison.Ordinal);
+            var message = fromAiHttp
+                ? "Dịch vụ AI (Python) đã nhận yêu cầu nhưng xử lý thất bại (thường do LLM: API key, hạn mức, hoặc tài khoản Blackbox/email bị chặn). Xem trường detail."
+                : "Không kết nối được dịch vụ AI (Python). Hãy chạy service AI (ví dụ uvicorn), kiểm tra AIService:BaseUrl và mạng/firewall.";
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                message,
+                detail = ex.Message
+            });
+        }
+        catch (TaskCanceledException)
+        {
+            return StatusCode(StatusCodes.Status504GatewayTimeout, new
+            {
+                message = "Dịch vụ AI phản hồi quá lâu hoặc bị hủy. Vui lòng thử lại."
+            });
+        }
+        catch (ExternalServiceException ex)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                message = "Dịch vụ AI trả về lỗi hoặc dữ liệu không hợp lệ.",
+                detail = ex.Message
+            });
         }
     }
 }

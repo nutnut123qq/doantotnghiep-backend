@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Constants;
 using StockInvestment.Infrastructure.Data;
 
 namespace StockInvestment.Infrastructure.BackgroundJobs;
@@ -107,10 +108,12 @@ public class TechnicalIndicatorCalculationJob : BackgroundService
 
     private async Task<List<string>> GetSymbolsToProcessAsync(ApplicationDbContext dbContext, CancellationToken cancellationToken)
     {
+        var allowed = Vn30Universe.Symbols.ToList();
         return await dbContext.StockTickers
             .Select(t => t.Symbol)
+            .Where(s => allowed.Contains(s))
             .Distinct()
-            .Take(50) // Giới hạn 50 mã để tránh quá tải
+            .Take(50)
             .ToListAsync(cancellationToken);
     }
 

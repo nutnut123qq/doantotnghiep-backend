@@ -9,6 +9,9 @@ using StockInvestment.Infrastructure.External;
 using StockInvestment.Infrastructure.Messaging;
 using StockInvestment.Infrastructure.Messaging.MessageHandlers;
 using StockInvestment.Infrastructure.Services;
+using StockInvestment.Infrastructure.Configuration;
+using StockInvestment.Api.Configuration;
+using StockInvestment.Application.Configuration;
 using StackExchange.Redis;
 using System.Text;
 using MediatR;
@@ -23,6 +26,7 @@ using ICacheKeyGenerator = StockInvestment.Application.Interfaces.ICacheKeyGener
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Net;
 using RabbitMQ.Client;
+using System.Text.Json.Serialization;
 
 namespace StockInvestment.Api.Extensions;
 
@@ -33,6 +37,9 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
     {
+        var environment = configuration.GetValue<string>("ASPNETCORE_ENVIRONMENT") ?? "Production";
+        var isNonProduction = environment is "Development" or "Testing";
+
         // P0-4: Configure ForwardedHeadersOptions for trusted proxies
         // This ensures X-Forwarded-For and X-Real-IP headers are only trusted from known proxies
         // Note: X-Real-IP is handled as part of XForwardedFor in .NET
@@ -87,7 +94,19 @@ public static class ServiceCollectionExtensions
             options.RequireHeaderSymmetry = false; // Set to true if all headers must match
         });
         
-        services.AddControllers();
+        services.Configure<AnalystContextOptions>(configuration.GetSection(AnalystContextOptions.SectionName));
+        services.Configure<NewsIngestionOptions>(configuration.GetSection(NewsIngestionOptions.SectionName));
+        services.Configure<FinancialIngestionOptions>(configuration.GetSection(FinancialIngestionOptions.SectionName));
+        services.Configure<EventIngestionOptions>(configuration.GetSection(EventIngestionOptions.SectionName));
+        services.Configure<StockAnalystOptions>(configuration.GetSection(StockAnalystOptions.SectionName));
+        services.Configure<AIInsightGenerationOptions>(configuration.GetSection(AIInsightGenerationOptions.SectionName));
+
+        services.AddControllers()
+            .AddJsonOptions(options =>
+            {
+                options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+                options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+            });
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen();
         
@@ -120,12 +139,23 @@ public static class ServiceCollectionExtensions
         // Add CORS
         services.AddCors(options =>
         {
-            options.AddPolicy("AllowAll", policy =>
+            var configuredOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
+            var allowedOrigins = (configuredOrigins != null && configuredOrigins.Length > 0)
+                ? configuredOrigins
+                : (isNonProduction ? new[] { "http://localhost:3000", "http://localhost:5173" } : Array.Empty<string>());
+
+            options.AddPolicy("FrontendCors", policy =>
             {
-                policy.WithOrigins("http://localhost:3000", "http://localhost:5173")
-                      .AllowAnyMethod()
-                      .AllowAnyHeader()
-                      .AllowCredentials();
+                if (allowedOrigins.Length == 0)
+                {
+                    throw new InvalidOperationException(
+                        "CORS origins are not configured. Please set Cors:AllowedOrigins in configuration.");
+                }
+
+                policy.WithOrigins(allowedOrigins)
+                    .AllowAnyMethod()
+                    .AllowAnyHeader()
+                    .AllowCredentials();
             });
         });
 
@@ -240,15 +270,34 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddInfrastructureServices(this IServiceCollection services, IConfiguration configuration)
     {
+        var environment = configuration.GetValue<string>("ASPNETCORE_ENVIRONMENT") ?? "Production";
+        var isNonProduction = environment is "Development" or "Testing";
+
         // Add Database Context
-        var connectionString = configuration.GetConnectionString("DefaultConnection") 
-            ?? "Host=localhost;Database=stock_investment;Username=postgres;Password=postgres";
+        var connectionString = configuration.GetConnectionString("DefaultConnection");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            if (!isNonProduction)
+            {
+                throw new InvalidOperationException("ConnectionStrings:DefaultConnection must be configured.");
+            }
+
+            connectionString = "Host=localhost;Database=stock_investment;Username=postgres;Password=postgres";
+        }
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseNpgsql(connectionString));
 
         // Add Redis
-        var redisConnection = configuration.GetConnectionString("Redis")
-            ?? "localhost:6379";
+        var redisConnection = configuration.GetConnectionString("Redis");
+        if (string.IsNullOrWhiteSpace(redisConnection))
+        {
+            if (!isNonProduction)
+            {
+                throw new InvalidOperationException("ConnectionStrings:Redis must be configured.");
+            }
+
+            redisConnection = "localhost:6379";
+        }
         services.AddSingleton<IConnectionMultiplexer>(sp =>
             ConnectionMultiplexer.Connect(redisConnection));
         // Register as Singleton since it's used in middleware (which is resolved from root provider)
@@ -300,14 +349,18 @@ public static class ServiceCollectionExtensions
     {
         services.AddScoped<ICacheKeyGenerator, CacheKeyGenerator>();
         services.AddScoped<ITechnicalDataService, TechnicalDataService>();
+        services.AddScoped<IAnalystContextService, AnalystContextService>();
         services.AddScoped<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IVNStockService, VNStockService>();
         services.AddScoped<IStockDataService, StockDataService>();
         services.AddScoped<INewsService, NewsService>();
+        services.AddScoped<RssNewsFetcher>();
         services.AddScoped<INewsCrawlerService, NewsCrawlerService>();
         services.AddScoped<IFinancialReportService, FinancialReportService>();
         services.AddScoped<IFinancialReportCrawlerService, FinancialReportCrawlerService>();
         services.AddScoped<IEventCrawlerService, EventCrawlerService>();
+        services.AddScoped<IEventRssIngestionService, EventRssIngestionService>();
+        services.AddScoped<ICorporateEventService, CorporateEventService>();
         services.AddScoped<ITechnicalIndicatorService, TechnicalIndicatorService>();
         services.AddScoped<IAdminService, AdminService>();
         services.AddScoped<ISystemHealthService, SystemHealthService>();
@@ -334,13 +387,24 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddHttpClients(this IServiceCollection services, IConfiguration configuration)
     {
+        var environment = configuration.GetValue<string>("ASPNETCORE_ENVIRONMENT") ?? "Production";
+        var isNonProduction = environment is "Development" or "Testing";
+
         // Register resilience policy service
         services.AddSingleton<Infrastructure.Services.ResiliencePolicyService>();
 
         // Configure HTTP Client for AI Service with resilience policies
         services.AddHttpClient("AIService", client =>
         {
-            var aiServiceUrl = configuration["AIService:BaseUrl"] ?? "http://localhost:8000";
+            var aiServiceUrl = configuration["AIService:BaseUrl"];
+            if (string.IsNullOrWhiteSpace(aiServiceUrl))
+            {
+                if (!isNonProduction)
+                {
+                    throw new InvalidOperationException("AIService:BaseUrl must be configured.");
+                }
+                aiServiceUrl = "http://localhost:8000";
+            }
             client.BaseAddress = new Uri(aiServiceUrl);
             client.Timeout = TimeSpan.FromSeconds(120); // Increase timeout to 120 seconds for AI processing
         })
@@ -353,10 +417,43 @@ public static class ServiceCollectionExtensions
                 durationOfBreak: TimeSpan.FromSeconds(30));
         });
 
+        // Dedicated market-data client for trading board/ticker requests.
+        // Keep timeout/retry lower than AI-generation workloads to reduce tail latency.
+        services.AddHttpClient("MarketDataAIService", client =>
+        {
+            var aiServiceUrl = configuration["AIService:BaseUrl"];
+            if (string.IsNullOrWhiteSpace(aiServiceUrl))
+            {
+                if (!isNonProduction)
+                {
+                    throw new InvalidOperationException("AIService:BaseUrl must be configured.");
+                }
+                aiServiceUrl = "http://localhost:8000";
+            }
+            client.BaseAddress = new Uri(aiServiceUrl);
+            client.Timeout = TimeSpan.FromSeconds(20);
+        })
+        .AddPolicyHandler((serviceProvider, request) =>
+        {
+            var policyService = serviceProvider.GetRequiredService<Infrastructure.Services.ResiliencePolicyService>();
+            return policyService.CreateCombinedPolicy(
+                retryCount: 1,
+                exceptionsAllowedBeforeBreaking: 3,
+                durationOfBreak: TimeSpan.FromSeconds(15));
+        });
+
         // Register AIServiceClient with HttpClient configuration and resilience policies
         services.AddHttpClient<AIServiceClient>(client =>
         {
-            var aiServiceUrl = configuration["AIService:BaseUrl"] ?? configuration["AIService:Url"] ?? "http://localhost:8000";
+            var aiServiceUrl = configuration["AIService:BaseUrl"] ?? configuration["AIService:Url"];
+            if (string.IsNullOrWhiteSpace(aiServiceUrl))
+            {
+                if (!isNonProduction)
+                {
+                    throw new InvalidOperationException("AIService:BaseUrl (or AIService:Url) must be configured.");
+                }
+                aiServiceUrl = "http://localhost:8000";
+            }
             client.BaseAddress = new Uri(aiServiceUrl);
             client.Timeout = TimeSpan.FromSeconds(120); // Increase timeout to 120 seconds for AI processing
         })
@@ -371,6 +468,37 @@ public static class ServiceCollectionExtensions
 
         // Register IAIService to use AIServiceClient
         services.AddScoped<IAIService>(sp => sp.GetRequiredService<AIServiceClient>());
+
+        // LangGraph Stock Analyst (Python ai /api/analyze) — optional; used when StockAnalyst:Enabled
+        services.AddHttpClient<LangGraphForecastClient>((serviceProvider, client) =>
+        {
+            var cfg = serviceProvider.GetRequiredService<IConfiguration>();
+            var opts = cfg.GetSection(StockAnalystOptions.SectionName).Get<StockAnalystOptions>() ?? new StockAnalystOptions();
+            var baseUrl = opts.BaseUrl;
+            if (string.IsNullOrWhiteSpace(baseUrl))
+                baseUrl = cfg["AIService:BaseUrl"] ?? cfg["AIService:Url"];
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                if (!isNonProduction)
+                    throw new InvalidOperationException("StockAnalyst:BaseUrl or AIService:BaseUrl must be configured when using LangGraph forecast.");
+                baseUrl = "http://localhost:8000";
+            }
+
+            client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
+            var timeoutSec = opts.TimeoutSeconds > 0 ? opts.TimeoutSeconds : 180;
+            client.Timeout = TimeSpan.FromSeconds(timeoutSec);
+        })
+        .AddPolicyHandler((serviceProvider, request) =>
+        {
+            var policyService = serviceProvider.GetRequiredService<Infrastructure.Services.ResiliencePolicyService>();
+            return policyService.CreateCombinedPolicy(
+                retryCount: 2,
+                exceptionsAllowedBeforeBreaking: 3,
+                durationOfBreak: TimeSpan.FromSeconds(30));
+        });
+
+        services.AddScoped<ILangGraphForecastMapper, LangGraphForecastMapper>();
+        services.AddScoped<ILangGraphForecastClient>(sp => sp.GetRequiredService<LangGraphForecastClient>());
 
         // Configure HTTP Client for News Crawler with resilience policies
         services.AddHttpClient("NewsCrawler", client =>
@@ -501,10 +629,11 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<Infrastructure.BackgroundJobs.AlertMonitorJob>();
         services.AddHostedService<Infrastructure.BackgroundJobs.TechnicalIndicatorCalculationJob>();
         services.AddHostedService<Infrastructure.BackgroundJobs.NewsCrawlerJob>();
+        services.AddHostedService<Infrastructure.BackgroundJobs.FinancialReportCrawlerJob>();
         services.AddHostedService<Infrastructure.BackgroundJobs.EventCrawlerJob>();
-        // AI Insight Generation Job - DISABLED to save tokens
-        // Insights are now generated on-demand when users click the "Generate" button
-        // services.AddHostedService<Infrastructure.BackgroundJobs.AIInsightGenerationJob>();
+        services.AddHostedService<Infrastructure.BackgroundJobs.EventRssCrawlerJob>();
+        // Global AI Insight generation (hybrid schedule + event triggers)
+        services.AddHostedService<Infrastructure.BackgroundJobs.AIInsightGenerationJob>();
 
         return services;
     }
@@ -514,10 +643,10 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddHealthChecks(this IServiceCollection services, IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("DefaultConnection") 
-            ?? "Host=localhost;Database=stock_investment;Username=postgres;Password=postgres";
+        var connectionString = configuration.GetConnectionString("DefaultConnection")
+            ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required for health checks.");
         var redisConnection = configuration.GetConnectionString("Redis")
-            ?? "localhost:6379";
+            ?? throw new InvalidOperationException("ConnectionStrings:Redis is required for health checks.");
 
         // P2-1: Add health checks with "ready" tag for /health/ready endpoint
         services.AddHealthChecks()

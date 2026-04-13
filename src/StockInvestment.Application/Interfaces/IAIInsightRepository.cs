@@ -39,4 +39,17 @@ public interface IAIInsightRepository : IRepository<AIInsight>
     /// Get old dismissed insights for cleanup
     /// </summary>
     Task<IEnumerable<AIInsight>> GetOldDismissedInsightsAsync(DateTime cutoffDate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get latest generated timestamp for a ticker.
+    /// </summary>
+    Task<DateTime?> GetLatestGeneratedAtByTickerAsync(Guid tickerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get global feed: latest active insight per (symbol, type).
+    /// </summary>
+    Task<IEnumerable<AIInsight>> GetGlobalLatestInsightsAsync(
+        InsightType? type = null,
+        string? symbol = null,
+        CancellationToken cancellationToken = default);
 }

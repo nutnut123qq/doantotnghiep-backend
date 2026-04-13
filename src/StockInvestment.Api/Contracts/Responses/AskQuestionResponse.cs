@@ -1,11 +1,22 @@
 namespace StockInvestment.Api.Contracts.Responses;
 
 /// <summary>
-/// API response for financial report Q&A
+/// Unified API response for Q&A endpoints.
 /// </summary>
 public class AskQuestionResponse
 {
     public string Question { get; set; } = string.Empty;
     public string Answer { get; set; } = string.Empty;
-    public List<string> Sources { get; set; } = new();
+    public List<QASourceResponse> Sources { get; set; } = new();
+}
+
+/// <summary>
+/// Source item attached to Q&A answer for citation rendering.
+/// </summary>
+public class QASourceResponse
+{
+    public string Title { get; set; } = string.Empty;
+    public string? Url { get; set; }
+    public string SourceType { get; set; } = string.Empty;
+    public string? PublishedAt { get; set; }
 }

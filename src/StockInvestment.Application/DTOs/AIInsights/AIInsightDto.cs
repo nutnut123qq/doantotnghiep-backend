@@ -17,4 +17,8 @@ public class AIInsightDto
     public decimal? StopLoss { get; set; }
     public DateTime Timestamp { get; set; }
     public DateTime GeneratedAt { get; set; }
+    public string QualityStatus { get; set; } = "needs_review";
+    public int QualityScore { get; set; }
+    public List<string> Evidence { get; set; } = new();
+    public Dictionary<string, string> QualityMetadata { get; set; } = new();
 }

@@ -2,8 +2,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
+using StockInvestment.Infrastructure.Configuration;
+using StockInvestment.Infrastructure.Services;
 
 namespace StockInvestment.Infrastructure.BackgroundJobs;
 
@@ -16,24 +19,27 @@ public class NewsCrawlerJob : BackgroundService
     private readonly ILogger<NewsCrawlerJob> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
-    private readonly TimeSpan _crawlInterval = TimeSpan.FromMinutes(30); // Crawl every 30 minutes
+    private readonly NewsIngestionOptions _ingestionOptions;
 
     public NewsCrawlerJob(
         ILogger<NewsCrawlerJob> logger,
         IServiceProvider serviceProvider,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IOptions<NewsIngestionOptions> ingestionOptions)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
         _configuration = configuration;
+        _ingestionOptions = ingestionOptions.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("News Crawler Job started");
 
-        // Wait 10 seconds before first run
-        await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+        var initialDelay = Math.Clamp(_ingestionOptions.InitialDelaySeconds, 0, 3600);
+        if (initialDelay > 0)
+            await Task.Delay(TimeSpan.FromSeconds(initialDelay), stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -46,7 +52,8 @@ public class NewsCrawlerJob : BackgroundService
                 _logger.LogError(ex, "Error crawling news");
             }
 
-            await Task.Delay(_crawlInterval, stoppingToken);
+            var pollMinutes = Math.Clamp(_ingestionOptions.PollMinutes, 1, 24 * 60);
+            await Task.Delay(TimeSpan.FromMinutes(pollMinutes), stoppingToken);
         }
 
         _logger.LogInformation("News Crawler Job stopped");
@@ -72,7 +79,8 @@ public class NewsCrawlerJob : BackgroundService
             _logger.LogInformation("Starting news crawl...");
 
             // Crawl news from all sources
-            var newsItems = await newsCrawlerService.CrawlNewsAsync(maxArticles: 50);
+            var maxPerRun = Math.Clamp(_ingestionOptions.MaxArticlesPerRun, 1, 500);
+            var newsItems = await newsCrawlerService.CrawlNewsAsync(maxArticles: maxPerRun);
             var newsList = newsItems.ToList();
 
             if (!newsList.Any())
@@ -85,6 +93,7 @@ public class NewsCrawlerJob : BackgroundService
 
             // Load existing URLs once into HashSet for efficient duplicate checking
             var existingUrls = await newsService.GetExistingUrlsAsync();
+            var existingFingerprints = await newsService.GetExistingFingerprintsAsync();
             _logger.LogInformation("Loaded {Count} existing URLs for duplicate check", existingUrls.Count);
 
             // Check for duplicates before adding to database
@@ -95,14 +104,26 @@ public class NewsCrawlerJob : BackgroundService
             {
                 try
                 {
-                    // Skip if URL is null or already exists
-                    if (string.IsNullOrWhiteSpace(news.Url) || existingUrls.Contains(news.Url))
+                    var canonicalUrl = CanonicalizeUrl(news.Url);
+                    var fingerprint = NewsService.BuildFingerprint(news.Title, news.Source, news.PublishedAt);
+
+                    // Skip if URL/fingerprint already exists
+                    if ((!string.IsNullOrWhiteSpace(canonicalUrl) && existingUrls.Contains(canonicalUrl))
+                        || (!string.IsNullOrWhiteSpace(fingerprint) && existingFingerprints.Contains(fingerprint)))
                     {
                         continue;
                     }
 
-                    // Mark URL as seen to avoid duplicates within the same batch
-                    existingUrls.Add(news.Url);
+                    // Mark dedupe keys as seen to avoid duplicates within the same batch
+                    if (!string.IsNullOrWhiteSpace(canonicalUrl))
+                    {
+                        news.Url = canonicalUrl;
+                        existingUrls.Add(canonicalUrl);
+                    }
+                    if (!string.IsNullOrWhiteSpace(fingerprint))
+                    {
+                        existingFingerprints.Add(fingerprint);
+                    }
                     newsToAdd.Add(news);
                 }
                 catch (Exception ex)
@@ -133,6 +154,46 @@ public class NewsCrawlerJob : BackgroundService
                 distributedLock.Dispose();
             }
         }
+    }
+
+    private static string? CanonicalizeUrl(string? rawUrl)
+    {
+        if (string.IsNullOrWhiteSpace(rawUrl))
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri))
+        {
+            return rawUrl.Trim();
+        }
+
+        var builder = new UriBuilder(uri)
+        {
+            Host = uri.Host.ToLowerInvariant(),
+            Fragment = string.Empty
+        };
+
+        var blockedParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"
+        };
+
+        var keptParams = (builder.Query ?? string.Empty)
+            .TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Where(part =>
+            {
+                var key = part.Split('=', 2)[0];
+                return !blockedParams.Contains(key);
+            })
+            .ToArray();
+
+        builder.Query = keptParams.Length == 0 ? string.Empty : string.Join("&", keptParams);
+        var normalizedPath = builder.Path.TrimEnd('/');
+        builder.Path = string.IsNullOrEmpty(normalizedPath) ? "/" : normalizedPath;
+
+        return builder.Uri.AbsoluteUri.TrimEnd('/');
     }
 }
 

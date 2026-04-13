@@ -31,6 +31,11 @@ public interface ICacheKeyGenerator
     string GenerateForecastKey(string symbol, string timeHorizon);
 
     /// <summary>
+    /// Forecast cache key when using LangGraph StockAnalyst (separate from ai-service cache).
+    /// </summary>
+    string GenerateLangGraphForecastKey(string symbol, string timeHorizon);
+
+    /// <summary>
     /// Generate cache key for portfolio holdings
     /// </summary>
     string GeneratePortfolioHoldingsKey(Guid userId);

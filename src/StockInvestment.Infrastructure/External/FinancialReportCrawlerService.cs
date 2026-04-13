@@ -2,6 +2,8 @@ using HtmlAgilityPack;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -9,6 +11,14 @@ namespace StockInvestment.Infrastructure.External;
 
 public class FinancialReportCrawlerService : IFinancialReportCrawlerService
 {
+    private const string VietCapGraphQlUrl = "https://trading.vietcap.com.vn/data-mt/graphql";
+
+    private static readonly JsonSerializerOptions JsonWriteOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false
+    };
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<FinancialReportCrawlerService> _logger;
     private readonly HttpClient _httpClient;
@@ -28,11 +38,15 @@ public class FinancialReportCrawlerService : IFinancialReportCrawlerService
 
         try
         {
-            var vietStockReports = await CrawlFromVietStockAsync(symbol, maxReports / 2);
-            reports.AddRange(vietStockReports);
+            var primary = await CrawlFromVietCapAsync(symbol, maxReports);
+            reports.AddRange(primary);
 
-            var cafeFReports = await CrawlFromCafeFAsync(symbol, maxReports / 2);
-            reports.AddRange(cafeFReports);
+            if (reports.Count == 0)
+            {
+                var half = Math.Max(1, maxReports / 2);
+                reports.AddRange(await CrawlFromVietStockAsync(symbol, half));
+                reports.AddRange(await CrawlFromCafeFAsync(symbol, half));
+            }
 
             _logger.LogInformation("Crawled {Count} financial reports for {Symbol}", reports.Count, symbol);
         }
@@ -44,21 +58,176 @@ public class FinancialReportCrawlerService : IFinancialReportCrawlerService
         return reports.Take(maxReports);
     }
 
+    /// <summary>
+    /// VietCap public GraphQL (same source as vnstock VCI). HTML scrapers often fail because tables load via JS.
+    /// </summary>
+    private async Task<List<FinancialReport>> CrawlFromVietCapAsync(string symbol, int maxReports)
+    {
+        var reports = new List<FinancialReport>();
+        var upper = symbol.Trim().ToUpperInvariant();
+        if (upper.Length == 0 || maxReports <= 0)
+            return reports;
+
+        try
+        {
+            const string query = """
+                query Q($ticker: String!, $period: String!) {
+                  CompanyFinancialRatio(ticker: $ticker, period: $period) {
+                    ratio {
+                      ticker
+                      yearReport
+                      lengthReport
+                      updateDate
+                      revenue
+                      netProfit
+                      eps
+                      roe
+                      roa
+                    }
+                  }
+                }
+                """;
+
+            var payload = JsonSerializer.Serialize(new
+            {
+                query,
+                variables = new { ticker = upper, period = "Q" }
+            }, JsonWriteOptions);
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, VietCapGraphQlUrl);
+            request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.TryAddWithoutValidation("Origin", "https://trading.vietcap.com.vn/");
+            request.Headers.TryAddWithoutValidation("Referer", "https://trading.vietcap.com.vn/");
+
+            using var response = await _httpClient.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "VietCap financial ratio request failed for {Symbol}: {Status} {Body}",
+                    upper,
+                    (int)response.StatusCode,
+                    body.Length > 500 ? body[..500] : body);
+                return reports;
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("errors", out var errors) &&
+                errors.ValueKind == JsonValueKind.Array &&
+                errors.GetArrayLength() > 0)
+            {
+                _logger.LogWarning("VietCap GraphQL returned errors for {Symbol}", upper);
+                return reports;
+            }
+
+            if (!doc.RootElement.TryGetProperty("data", out var data) ||
+                !data.TryGetProperty("CompanyFinancialRatio", out var cfr) ||
+                cfr.ValueKind == JsonValueKind.Null ||
+                !cfr.TryGetProperty("ratio", out var ratioArr) ||
+                ratioArr.ValueKind != JsonValueKind.Array)
+            {
+                _logger.LogWarning("VietCap: no ratio array for {Symbol}", upper);
+                return reports;
+            }
+
+            foreach (var row in ratioArr.EnumerateArray())
+            {
+                if (reports.Count >= maxReports)
+                    break;
+
+                if (!row.TryGetProperty("yearReport", out var yEl) ||
+                    yEl.ValueKind != JsonValueKind.Number ||
+                    !yEl.TryGetInt32(out var year))
+                    continue;
+
+                if (!row.TryGetProperty("lengthReport", out var qEl) ||
+                    qEl.ValueKind != JsonValueKind.Number ||
+                    !qEl.TryGetInt32(out var lengthReport) ||
+                    lengthReport is < 1 or > 4)
+                    continue;
+
+                if (!row.TryGetProperty("updateDate", out var uEl) ||
+                    uEl.ValueKind != JsonValueKind.Number ||
+                    !uEl.TryGetInt64(out var updateMs))
+                    continue;
+
+                var revenue = ReadNullableLong(row, "revenue");
+                var netProfit = ReadNullableLong(row, "netProfit");
+                var eps = ReadNullableDecimal(row, "eps");
+                var roe = ReadNullableDecimal(row, "roe");
+                var roa = ReadNullableDecimal(row, "roa");
+
+                var content = JsonSerializer.Serialize(
+                    new Dictionary<string, object?>
+                    {
+                        ["Source"] = "VietCap",
+                        ["Revenue"] = revenue,
+                        ["NetProfit"] = netProfit,
+                        ["EPS"] = eps,
+                        ["ROE"] = roe,
+                        ["ROA"] = roa,
+                        ["Year"] = year,
+                        ["Quarter"] = lengthReport
+                    },
+                    JsonWriteOptions);
+
+                var reportDate = DateTimeOffset.FromUnixTimeMilliseconds(updateMs).UtcDateTime;
+
+                reports.Add(new FinancialReport
+                {
+                    ReportType = "Quarterly",
+                    Year = year,
+                    Quarter = lengthReport,
+                    Content = content,
+                    ReportDate = reportDate,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            if (reports.Count > 0)
+                _logger.LogInformation("Crawled {Count} reports from VietCap for {Symbol}", reports.Count, upper);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error crawling VietCap for {Symbol}", symbol);
+        }
+
+        return reports;
+    }
+
+    private static long? ReadNullableLong(JsonElement row, string name)
+    {
+        if (!row.TryGetProperty(name, out var el) || el.ValueKind == JsonValueKind.Null)
+            return null;
+        return el.TryGetInt64(out var v) ? v : null;
+    }
+
+    private static decimal? ReadNullableDecimal(JsonElement row, string name)
+    {
+        if (!row.TryGetProperty(name, out var el) || el.ValueKind == JsonValueKind.Null)
+            return null;
+        if (el.ValueKind == JsonValueKind.Number && el.TryGetDecimal(out var d))
+            return d;
+        return null;
+    }
+
     public async Task<IEnumerable<FinancialReport>> CrawlFromVietStockAsync(string symbol, int maxReports = 5)
     {
         var reports = new List<FinancialReport>();
 
         try
         {
-            // VietStock financial report URL
-            var url = $"https://finance.vietstock.vn/{symbol}/financials.htm";
+            // Prefer Vietnamese path; legacy financials.htm may redirect.
+            var url = $"https://finance.vietstock.vn/{symbol}/tai-chinh.htm";
             var html = await _httpClient.GetStringAsync(url);
 
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
 
-            // Parse financial data tables
-            var tables = doc.DocumentNode.SelectNodes("//table[@class='table-financials']");
+            // Parse financial data tables (often empty in raw HTML — tables load via JS)
+            var tables = doc.DocumentNode.SelectNodes("//table[@class='table-financials']")
+                ?? doc.DocumentNode.SelectNodes("//table[contains(@class,'table-financial')]");
             if (tables == null || !tables.Any())
             {
                 _logger.LogWarning("No financial tables found for {Symbol} on VietStock", symbol);
@@ -119,8 +288,10 @@ public class FinancialReportCrawlerService : IFinancialReportCrawlerService
 
         try
         {
-            // CafeF financial report URL
-            var url = $"https://s.cafef.vn/bao-cao-tai-chinh/{symbol}/IncSta/2024/0/0/0/bao-cao-ket-qua-hoat-dong-kinh-doanh-cua-cong-ty-co-phan-{symbol}.chn";
+            var cafeFUrlYear = DateTime.UtcNow.Year;
+            // Many symbols redirect to generic pages; kept as last-resort fallback.
+            var url =
+                $"https://s.cafef.vn/bao-cao-tai-chinh/{symbol}/IncSta/{cafeFUrlYear}/0/0/0/bao-cao-ket-qua-hoat-dong-kinh-doanh-cua-cong-ty-co-phan-{symbol}.chn";
             var html = await _httpClient.GetStringAsync(url);
 
             var doc = new HtmlDocument();

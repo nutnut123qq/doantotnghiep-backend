@@ -27,6 +27,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="StockInvestment.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\StockInvestment.Application\StockInvestment.Application.csproj" />
     <ProjectReference Include="..\StockInvestment.Infrastructure\StockInvestment.Infrastructure.csproj" />
     <ProjectReference Include="..\StockInvestment.Shared\StockInvestment.Shared.csproj" />

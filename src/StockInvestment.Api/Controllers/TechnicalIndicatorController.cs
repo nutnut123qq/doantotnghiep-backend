@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Constants;
 
 namespace StockInvestment.Api.Controllers;
 
@@ -28,6 +29,11 @@ public class TechnicalIndicatorController : ControllerBase
     {
         try
         {
+            if (!Vn30Universe.Contains(symbol))
+            {
+                return NotFound(new { message = $"Technical indicators are only available for VN30 symbols. '{symbol}' is not supported." });
+            }
+
             var indicators = await _indicatorService.CalculateAllIndicatorsAsync(symbol);
             return Ok(new { symbol, indicators });
         }
@@ -46,6 +52,11 @@ public class TechnicalIndicatorController : ControllerBase
     {
         try
         {
+            if (!Vn30Universe.Contains(symbol))
+            {
+                return NotFound(new { message = $"Technical indicators are only available for VN30 symbols. '{symbol}' is not supported." });
+            }
+
             object? result = indicatorType.ToUpper() switch
             {
                 "MA" => await _indicatorService.CalculateMAAsync(symbol, period),

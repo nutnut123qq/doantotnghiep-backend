@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Interfaces;
+using System.Diagnostics;
 
 namespace StockInvestment.Api.Controllers;
 
@@ -23,14 +24,26 @@ public class TradingBoardController : ControllerBase
         [FromQuery] string? industry = null,
         [FromQuery] Guid? watchlistId = null)
     {
+        var requestId = HttpContext.TraceIdentifier;
+        var sw = Stopwatch.StartNew();
         try
         {
-            var tickers = await _stockDataService.GetTickersAsync(exchange, index, industry, watchlistId);
+            if (!string.IsNullOrWhiteSpace(index)
+                && !string.Equals(index.Trim(), "VN30", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "Only VN30 index is supported." });
+            }
+
+            var tickers = await _stockDataService.GetTickersAsync(exchange, index, industry, watchlistId, requestId);
+            _logger.LogInformation(
+                "TradingBoard request completed in {ElapsedMs}ms requestId={RequestId}",
+                sw.ElapsedMilliseconds,
+                requestId);
             return Ok(tickers);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching tickers");
+            _logger.LogError(ex, "Error fetching tickers requestId={RequestId}", requestId);
             return StatusCode(500, "An error occurred while fetching tickers");
         }
     }

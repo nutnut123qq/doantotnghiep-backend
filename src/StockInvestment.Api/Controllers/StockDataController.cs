@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.DTOs.StockData;
+using StockInvestment.Domain.Constants;
 
 namespace StockInvestment.Api.Controllers;
 
@@ -12,23 +13,29 @@ namespace StockInvestment.Api.Controllers;
 public class StockDataController : ControllerBase
 {
     private readonly IVNStockService _vnStockService;
+    private readonly IStockTickerRepository _stockTickerRepository;
     private readonly ICacheService _cacheService;
     private readonly ILogger<StockDataController> _logger;
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
     private readonly bool _allowMockMarketData;
+    private readonly IWebHostEnvironment _environment;
 
     public StockDataController(
         IVNStockService vnStockService,
+        IStockTickerRepository stockTickerRepository,
         ICacheService cacheService,
         ILogger<StockDataController> logger,
         ICacheKeyGenerator cacheKeyGenerator,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IWebHostEnvironment environment)
     {
         _vnStockService = vnStockService;
+        _stockTickerRepository = stockTickerRepository;
         _cacheService = cacheService;
         _logger = logger;
         _cacheKeyGenerator = cacheKeyGenerator;
         _allowMockMarketData = configuration.GetValue<bool>("Features:AllowMockMarketData", defaultValue: false);
+        _environment = environment;
     }
 
     /// <summary>
@@ -42,6 +49,11 @@ public class StockDataController : ControllerBase
     {
         try
         {
+            if (!Vn30Universe.Contains(symbol))
+            {
+                return NotFound(new { message = $"OHLCV is only available for VN30 symbols. '{symbol}' is not supported." });
+            }
+
             var start = startDate ?? DateTime.Now.AddMonths(-3);
             var end = endDate ?? DateTime.Now;
             var cacheKey = _cacheKeyGenerator.GenerateOHLCVKey(symbol, start, end);
@@ -58,11 +70,14 @@ public class StockDataController : ControllerBase
                     // P0-3: If no data from external service, check feature flag before using mock data
                     if (data == null || !data.Any())
                     {
-                        if (_allowMockMarketData)
+                        var allowMock = _allowMockMarketData || _environment.IsDevelopment();
+                        if (allowMock)
                         {
                             _logger.LogWarning(
-                                "No historical data from external service for {Symbol}, using mock data (AllowMockMarketData=true)",
-                                symbol);
+                                "No historical data from external service for {Symbol}, using mock data (AllowMockMarketData={AllowMockMarketData}, IsDevelopment={IsDevelopment})",
+                                symbol,
+                                _allowMockMarketData,
+                                _environment.IsDevelopment());
                             data = GenerateMockHistoricalData(symbol, start, end);
                         }
                         else
@@ -106,7 +121,7 @@ public class StockDataController : ControllerBase
     {
         var data = new List<OHLCVData>();
         var random = new Random(symbol.GetHashCode());
-        var basePrice = random.Next(50000, 200000) / 1000.0m; // Random base price between 50-200
+        var basePrice = random.Next(50000, 200000) * 1m; // Random base price between 50,000-200,000 VND
         var currentPrice = basePrice;
         
         for (var date = start.Date; date <= end.Date; date = date.AddDays(1))
@@ -146,6 +161,11 @@ public class StockDataController : ControllerBase
     {
         try
         {
+            if (!Vn30Universe.Contains(symbol))
+            {
+                return NotFound(new { message = $"Quote is only available for VN30 symbols. '{symbol}' is not supported." });
+            }
+
             var cacheKey = _cacheKeyGenerator.GenerateQuoteKey(symbol);
 
             // Try to get from cache first
@@ -197,14 +217,26 @@ public class StockDataController : ControllerBase
     {
         try
         {
-            var symbols = await _vnStockService.GetAllSymbolsAsync(exchange);
-            var symbolList = symbols.Select(s => new
+            var dict = await _stockTickerRepository.GetBySymbolsAsync(Vn30Universe.Symbols);
+            var symbolList = new List<object>();
+            foreach (var s in Vn30Universe.Symbols)
             {
-                symbol = s.Symbol,
-                name = s.Name,
-                exchange = s.Exchange.ToString(),
-                industry = s.Industry
-            });
+                dict.TryGetValue(s, out var t);
+                var exchangeStr = t?.Exchange.ToString() ?? "HOSE";
+                if (!string.IsNullOrEmpty(exchange)
+                    && !exchangeStr.Equals(exchange, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                symbolList.Add(new
+                {
+                    symbol = s,
+                    name = t?.Name ?? s,
+                    exchange = exchangeStr,
+                    industry = t?.Industry
+                });
+            }
 
             return Ok(symbolList);
         }

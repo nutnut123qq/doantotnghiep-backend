@@ -18,6 +18,7 @@ public class EventCrawlerService : IEventCrawlerService
     private readonly HttpClient _httpClient;
     private readonly IUnitOfWork _unitOfWork;
     private readonly bool _enableCafeF;
+    private readonly bool _enableVietStock;
 
     public EventCrawlerService(
         ILogger<EventCrawlerService> logger,
@@ -30,6 +31,7 @@ public class EventCrawlerService : IEventCrawlerService
         _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         _unitOfWork = unitOfWork;
         _enableCafeF = configuration.GetValue<bool>("EventCrawler:EnableCafeF");
+        _enableVietStock = configuration.GetValue<bool>("EventCrawler:EnableVietStock");
     }
 
     public async Task<IEnumerable<CorporateEvent>> CrawlUpcomingEventsAsync(int daysAhead = 30)
@@ -41,10 +43,16 @@ public class EventCrawlerService : IEventCrawlerService
             _logger.LogInformation("Starting to crawl upcoming events for next {DaysAhead} days", daysAhead);
 
             // Crawl from multiple sources in parallel
-            var tasks = new List<Task<IEnumerable<CorporateEvent>>>
+            var tasks = new List<Task<IEnumerable<CorporateEvent>>>();
+
+            if (_enableVietStock)
             {
-                CrawlVietStockEventsAsync(daysAhead)
-            };
+                tasks.Add(CrawlVietStockEventsAsync(daysAhead));
+            }
+            else
+            {
+                _logger.LogInformation("VietStock event crawling is disabled by configuration");
+            }
 
             if (_enableCafeF)
             {
@@ -271,7 +279,7 @@ public class EventCrawlerService : IEventCrawlerService
             var eventDetails = cells[3].InnerText.Trim();
 
             // Determine event type from title/details
-            var eventType = DetermineEventType(eventTitle + " " + eventDetails);
+            var eventType = CorporateEventTextHelper.DetermineEventType(eventTitle + " " + eventDetails);
 
             // Create appropriate event based on type
             CorporateEvent corporateEvent = eventType switch
@@ -306,29 +314,6 @@ public class EventCrawlerService : IEventCrawlerService
         // Similar parsing logic for CafeF
         // This is a placeholder - implement based on actual CafeF HTML structure
         return null;
-    }
-
-    private CorporateEventType DetermineEventType(string text)
-    {
-        var lowerText = text.ToLowerInvariant();
-
-        if (lowerText.Contains("họp đại hội") || lowerText.Contains("agm") || lowerText.Contains("đhđcđ"))
-            return CorporateEventType.AGM;
-        
-        if (lowerText.Contains("cổ tức") || lowerText.Contains("dividend") || lowerText.Contains("trả cổ tức"))
-            return CorporateEventType.Dividend;
-        
-        if (lowerText.Contains("kết quả") || lowerText.Contains("earnings") || lowerText.Contains("lợi nhuận") || lowerText.Contains("doanh thu"))
-            return CorporateEventType.Earnings;
-        
-        if (lowerText.Contains("chia tách") || lowerText.Contains("split") || lowerText.Contains("ghép cổ phiếu"))
-            return CorporateEventType.StockSplit;
-        
-        if (lowerText.Contains("phát hành") || lowerText.Contains("rights issue") || lowerText.Contains("tăng vốn"))
-            return CorporateEventType.RightsIssue;
-
-        // Default to Earnings if unclear
-        return CorporateEventType.Earnings;
     }
 
     private EarningsEvent CreateEarningsEventFromText(Guid tickerId, DateTime eventDate, string title, string details)

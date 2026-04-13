@@ -132,4 +132,26 @@ public class CorporateEventRepository : ICorporateEventRepository
                 e.EventType == eventType && 
                 e.EventDate.Date == eventDate.Date);
     }
+
+    public async Task<bool> ExistsBySourceUrlAsync(string sourceUrl)
+    {
+        if (string.IsNullOrWhiteSpace(sourceUrl))
+            return false;
+
+        return await _context.CorporateEvents
+            .AnyAsync(e => e.SourceUrl != null && e.SourceUrl.ToLower() == sourceUrl.ToLower());
+    }
+
+    public async Task<IReadOnlyList<CorporateEvent>> GetRecentBySymbolAsync(string symbol, DateTime sinceUtc, int take)
+    {
+        var normalized = symbol.Trim().ToUpperInvariant();
+        var cap = Math.Clamp(take, 1, 100);
+
+        return await _context.CorporateEvents
+            .Include(e => e.StockTicker)
+            .Where(e => e.StockTicker.Symbol == normalized && e.EventDate >= sinceUtc.Date)
+            .OrderByDescending(e => e.EventDate)
+            .Take(cap)
+            .ToListAsync();
+    }
 }

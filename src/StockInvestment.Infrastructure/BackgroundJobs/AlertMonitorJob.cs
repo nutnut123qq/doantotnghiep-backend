@@ -7,6 +7,8 @@ using StockInvestment.Application.Contracts.Notifications;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Enums;
 using StockInvestment.Infrastructure.Hubs;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Text.Json;
 
 namespace StockInvestment.Infrastructure.BackgroundJobs;
@@ -17,9 +19,14 @@ namespace StockInvestment.Infrastructure.BackgroundJobs;
 /// </summary>
 public class AlertMonitorJob : BackgroundService
 {
+    private static readonly Meter JobMeter = new("StockInvestment.BackgroundJobs");
+    private static readonly Counter<long> JobSuccessCounter = JobMeter.CreateCounter<long>("job_runs_success");
+    private static readonly Counter<long> JobFailureCounter = JobMeter.CreateCounter<long>("job_runs_failure");
+    private static readonly Counter<long> JobLockSkippedCounter = JobMeter.CreateCounter<long>("job_runs_lock_skipped");
     private readonly ILogger<AlertMonitorJob> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
+    private readonly bool _enableExternalChannels;
     private readonly TimeSpan _checkInterval = TimeSpan.FromMinutes(1);
 
     public AlertMonitorJob(
@@ -30,6 +37,7 @@ public class AlertMonitorJob : BackgroundService
         _logger = logger;
         _serviceProvider = serviceProvider;
         _configuration = configuration;
+        _enableExternalChannels = _configuration.GetValue<bool>("Notifications:EnableExternalChannels");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -55,15 +63,21 @@ public class AlertMonitorJob : BackgroundService
 
     private async Task CheckAlertsAsync(CancellationToken cancellationToken)
     {
+        var runId = Guid.NewGuid().ToString("N");
+        var stopwatch = Stopwatch.StartNew();
+        const string jobName = "alert-monitor";
+        var runSucceeded = false;
         using var scope = _serviceProvider.CreateScope();
         
-        // P1-2: Acquire distributed lock
         var distributedLock = await JobLockHelper.TryAcquireLockAsync(
-            scope, _configuration, _logger, "alert-monitor", TimeSpan.FromMinutes(5), cancellationToken);
+            scope, _configuration, _logger, jobName, TimeSpan.FromMinutes(5), cancellationToken);
         
         if (distributedLock == null)
         {
-            return; // Lock not acquired or disabled
+            JobLockSkippedCounter.Add(1, new KeyValuePair<string, object?>("jobName", jobName));
+            _logger.LogInformation("Background job skipped: {jobName} runId={runId} lockAcquired={lockAcquired} result={result}",
+                jobName, runId, false, "skipped_lock");
+            return;
         }
 
         try
@@ -71,7 +85,8 @@ public class AlertMonitorJob : BackgroundService
             var unitOfWork = scope.ServiceProvider.GetRequiredService<StockInvestment.Application.Interfaces.IUnitOfWork>();
             var activeAlerts = await unitOfWork.Alerts.GetActiveAlertsWithTickerAndUserAsync(cancellationToken);
 
-            _logger.LogInformation("Checking {Count} active alerts", activeAlerts.Count());
+            _logger.LogInformation("Background job running: {jobName} runId={runId} lockAcquired={lockAcquired} activeAlerts={activeAlerts}",
+                jobName, runId, true, activeAlerts.Count());
 
             foreach (var alert in activeAlerts)
             {
@@ -88,11 +103,33 @@ public class AlertMonitorJob : BackgroundService
                 bool shouldTrigger = false;
                 decimal currentValue = 0;  // Runtime snapshot
 
-                switch (alert.Type)
+                // DB/legacy rows may have Type = 0; treat as Price so alerts still evaluate.
+                var alertType = Enum.IsDefined(typeof(AlertType), alert.Type)
+                    ? alert.Type
+                    : AlertType.Price;
+
+                switch (alertType)
                 {
                     case AlertType.Price:
                         currentValue = alert.Ticker.CurrentPrice;  // Snapshot TRƯỚC khi check
+                        if (currentValue == 0)
+                        {
+                            _logger.LogWarning(
+                                "Price alert {AlertId} for {Symbol} skipped: CurrentPrice is 0 (check AI/market quote service and StockPriceUpdateJob).",
+                                alert.Id,
+                                alert.Ticker.Symbol);
+                        }
                         shouldTrigger = CheckPriceAlert(alert);
+                        if (!shouldTrigger && alert.Threshold.HasValue)
+                        {
+                            _logger.LogDebug(
+                                "Price alert {AlertId} {Symbol} not triggered: price={Price} threshold={Threshold} op={Op}",
+                                alert.Id,
+                                alert.Ticker.Symbol,
+                                currentValue,
+                                alert.Threshold.Value,
+                                GetOperator(alert));
+                        }
                         break;
                     case AlertType.Volume:
                         currentValue = alert.Ticker.Volume ?? 0;
@@ -119,10 +156,13 @@ public class AlertMonitorJob : BackgroundService
                     await TriggerAlertAsync(alert, currentValue, unitOfWork, cancellationToken);  // Pass snapshot
                 }
             }
+            runSucceeded = true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in CheckAlertsAsync");
+            JobFailureCounter.Add(1, new KeyValuePair<string, object?>("jobName", jobName));
+            _logger.LogError(ex, "Background job failed: {jobName} runId={runId} lockAcquired={lockAcquired} durationMs={durationMs} result={result}",
+                jobName, runId, true, stopwatch.ElapsedMilliseconds, "failed");
         }
         finally
         {
@@ -132,6 +172,12 @@ public class AlertMonitorJob : BackgroundService
                 await distributedLock.ReleaseAsync();
                 distributedLock.Dispose();
             }
+            if (runSucceeded && !cancellationToken.IsCancellationRequested)
+            {
+                JobSuccessCounter.Add(1, new KeyValuePair<string, object?>("jobName", jobName));
+                _logger.LogInformation("Background job completed: {jobName} runId={runId} lockAcquired={lockAcquired} durationMs={durationMs} result={result}",
+                    jobName, runId, true, stopwatch.ElapsedMilliseconds, "completed");
+            }
         }
     }
 
@@ -140,27 +186,18 @@ public class AlertMonitorJob : BackgroundService
         if (alert.Ticker == null || !alert.Threshold.HasValue)
             return false;
 
-        try
-        {
-            var condition = JsonSerializer.Deserialize<AlertCondition>(alert.Condition);
-            if (condition == null) return false;
+        var currentPrice = alert.Ticker.CurrentPrice;
+        var normalizedOperator = GetOperator(alert);
 
-            var currentPrice = alert.Ticker.CurrentPrice;
-
-            return condition.Operator?.ToLower() switch
-            {
-                ">" or "above" or "greater" => currentPrice > alert.Threshold.Value,
-                "<" or "below" or "less" => currentPrice < alert.Threshold.Value,
-                ">=" => currentPrice >= alert.Threshold.Value,
-                "<=" => currentPrice <= alert.Threshold.Value,
-                "=" or "equals" => Math.Abs(currentPrice - alert.Threshold.Value) < 0.01m,
-                _ => false
-            };
-        }
-        catch
+        return normalizedOperator switch
         {
-            return false;
-        }
+            ">" => currentPrice > alert.Threshold.Value,
+            "<" => currentPrice < alert.Threshold.Value,
+            ">=" => currentPrice >= alert.Threshold.Value,
+            "<=" => currentPrice <= alert.Threshold.Value,
+            "=" => Math.Abs(currentPrice - alert.Threshold.Value) < 0.01m,
+            _ => false
+        };
     }
 
     private bool CheckVolumeAlert(Domain.Entities.Alert alert)
@@ -191,33 +228,7 @@ public class AlertMonitorJob : BackgroundService
             TriggeredAt = DateTime.UtcNow,
             Operator = operatorStr,
             MatchedCondition = $"{alert.Type} {operatorStr} {alert.Threshold}"
-            // AiExplanation has default value "AI explanation unavailable", will be overwritten below
         };
-
-        // Get AI Explanation với timeout
-        try
-        {
-            using var aiCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            aiCts.CancelAfter(TimeSpan.FromSeconds(3));
-
-            using var scope = _serviceProvider.CreateScope();
-            var aiService = scope.ServiceProvider.GetRequiredService<IAIService>();
-
-            var explanation = await aiService.GetAlertExplanationAsync(
-                alert.Ticker?.Symbol ?? "",
-                alert.Type.ToString(),
-                currentValue,
-                alert.Threshold ?? 0,
-                aiCts.Token
-            );
-
-            context.AiExplanation = explanation ?? "AI explanation unavailable";
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to get AI explanation for alert {AlertId}", alert.Id);
-            context.AiExplanation = "AI explanation unavailable";
-        }
 
         // P0-3: Alert is already marked as triggered atomically in CheckAlertsAsync
         // No need to update again here - just ensure state is saved if needed
@@ -239,8 +250,7 @@ public class AlertMonitorJob : BackgroundService
                 type = alert.Type.ToString(),
                 threshold = alert.Threshold,
                 currentValue = context.CurrentValue,
-                triggeredAt = alert.TriggeredAt,
-                aiExplanation = context.AiExplanation
+                triggeredAt = alert.TriggeredAt
             };
 
             // Event name: "AlertTriggered"
@@ -254,18 +264,25 @@ public class AlertMonitorJob : BackgroundService
             _logger.LogError(ex, "Failed to send SignalR notification for alert {AlertId}", alert.Id);
         }
 
-        // Send external notifications (Slack/Telegram)
-        try
+        // Send external notifications (Slack/Telegram) only when explicitly enabled
+        if (_enableExternalChannels)
         {
-            using var scope = _serviceProvider.CreateScope();
-            var notificationService = scope.ServiceProvider.GetRequiredService<INotificationChannelService>();
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var notificationService = scope.ServiceProvider.GetRequiredService<INotificationChannelService>();
 
-            await notificationService.SendAlertNotificationAsync(context, cancellationToken);
+                await notificationService.SendAlertNotificationAsync(context, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send external notifications for alert {AlertId}", alert.Id);
+                // Don't fail the alert trigger
+            }
         }
-        catch (Exception ex)
+        else
         {
-            _logger.LogError(ex, "Failed to send external notifications for alert {AlertId}", alert.Id);
-            // Don't fail the alert trigger
+            _logger.LogInformation("External alert notifications disabled by configuration for alert {AlertId}", alert.Id);
         }
 
         _logger.LogInformation("Alert {AlertId} triggered successfully", alert.Id);
@@ -273,26 +290,36 @@ public class AlertMonitorJob : BackgroundService
 
     private string GetOperator(Domain.Entities.Alert alert)
     {
+        if (string.IsNullOrWhiteSpace(alert.Condition))
+            return ">";
+
         try
         {
             var condition = JsonSerializer.Deserialize<AlertCondition>(alert.Condition);
-            if (condition?.Operator == null)
-                return ">";
-
-            // Check >= and <= BEFORE > and <
-            var op = condition.Operator.ToLower();
-            if (op.Contains(">=")) return ">=";
-            if (op.Contains("<=")) return "<=";
-            if (op.Contains(">") || op == "above" || op == "greater") return ">";
-            if (op.Contains("<") || op == "below" || op == "less") return "<";
-            if (op == "=" || op == "equals") return "=";
-
-            return ">";
+            if (!string.IsNullOrWhiteSpace(condition?.Operator))
+                return NormalizeOperator(condition.Operator);
         }
-        catch
+        catch (Exception)
         {
-            return ">";
+            // Condition can be plain text values like "greater_than" from manual UI flow.
         }
+
+        return NormalizeOperator(alert.Condition);
+    }
+
+    private static string NormalizeOperator(string rawOperator)
+    {
+        var op = rawOperator.Trim().ToLowerInvariant();
+
+        return op switch
+        {
+            ">=" or "gte" or "greater_or_equal" or "greater_or_equal_than" => ">=",
+            "<=" or "lte" or "less_or_equal" or "less_or_equal_than" => "<=",
+            ">" or "above" or "greater" or "greater_than" => ">",
+            "<" or "below" or "less" or "less_than" => "<",
+            "=" or "equals" or "equal" => "=",
+            _ => ">"
+        };
     }
 }
 

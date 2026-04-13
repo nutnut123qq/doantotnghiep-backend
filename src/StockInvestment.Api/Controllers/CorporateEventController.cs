@@ -6,6 +6,7 @@ using StockInvestment.Application.Features.CorporateEvents.GetCorporateEvents;
 using StockInvestment.Application.Features.CorporateEvents.GetEventById;
 using StockInvestment.Application.Features.CorporateEvents.GetUpcomingEvents;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Api.Contracts.Responses;
 using StockInvestment.Domain.Entities;
 
 namespace StockInvestment.Api.Controllers;
@@ -17,15 +18,18 @@ public class CorporateEventController : ControllerBase
 {
     private readonly IMediator _mediator;
     private readonly IAIService? _aiService;
+    private readonly ICorporateEventService _corporateEventService;
     private readonly ILogger<CorporateEventController> _logger;
 
     public CorporateEventController(
-        IMediator mediator, 
+        IMediator mediator,
         ILogger<CorporateEventController> logger,
+        ICorporateEventService corporateEventService,
         IAIService? aiService = null)
     {
         _mediator = mediator;
         _aiService = aiService;
+        _corporateEventService = corporateEventService;
         _logger = logger;
     }
 
@@ -117,6 +121,45 @@ public class CorporateEventController : ControllerBase
     }
 
     /// <summary>
+    /// Ask a question based on recent corporate events for a symbol (RAG).
+    /// </summary>
+    [HttpPost("qa")]
+    [ProducesResponseType(typeof(AskQuestionResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> AskCorporateEventsQuestion(
+        [FromBody] AskCorporateEventQuestionRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Symbol))
+            return BadRequest("Symbol is required");
+        if (string.IsNullOrWhiteSpace(request.Question))
+            return BadRequest("Question is required");
+
+        var result = await _corporateEventService.AskQuestionAsync(
+            request.Symbol,
+            request.Question,
+            request.Days,
+            request.TopK,
+            cancellationToken);
+
+        var sources = result.Sources
+            .Select(s => new QASourceResponse
+            {
+                Title = string.IsNullOrWhiteSpace(s.Title) ? "Corporate event" : s.Title,
+                Url = s.SourceUrl,
+                SourceType = string.IsNullOrWhiteSpace(s.Source) ? "corporate_event" : s.Source,
+                PublishedAt = null
+            })
+            .ToList();
+
+        return Ok(new AskQuestionResponse
+        {
+            Question = request.Question,
+            Answer = result.Answer,
+            Sources = sources
+        });
+    }
+
+    /// <summary>
     /// Create a new corporate event
     /// </summary>
     /// <param name="command">Event creation data</param>
@@ -174,4 +217,12 @@ public class CorporateEventController : ControllerBase
             return StatusCode(500, "An error occurred while analyzing the event");
         }
     }
+}
+
+public class AskCorporateEventQuestionRequest
+{
+    public string Symbol { get; set; } = string.Empty;
+    public string Question { get; set; } = string.Empty;
+    public int Days { get; set; } = 90;
+    public int TopK { get; set; } = 6;
 }

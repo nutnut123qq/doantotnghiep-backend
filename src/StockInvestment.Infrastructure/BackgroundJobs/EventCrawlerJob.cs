@@ -16,7 +16,7 @@ public class EventCrawlerJob : BackgroundService
     private readonly ILogger<EventCrawlerJob> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
-    private readonly TimeSpan _crawlInterval = TimeSpan.FromHours(12); // Crawl every 12 hours
+    private readonly TimeSpan _crawlInterval = TimeSpan.FromMinutes(10);
 
     public EventCrawlerJob(
         ILogger<EventCrawlerJob> logger,

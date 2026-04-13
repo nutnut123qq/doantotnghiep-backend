@@ -145,6 +145,13 @@ public class SystemHealthService : ISystemHealthService
                     IsRunning = true, 
                     LastRunTime = DateTime.UtcNow.AddHours(-6),
                     Status = "Running - Crawls every 12 hours"
+                },
+                new JobStatus
+                {
+                    JobName = "EventRssCrawlerJob",
+                    IsRunning = true,
+                    LastRunTime = DateTime.UtcNow.AddMinutes(-20),
+                    Status = "Running - EventIngestion:PollMinutes"
                 }
             }
         };

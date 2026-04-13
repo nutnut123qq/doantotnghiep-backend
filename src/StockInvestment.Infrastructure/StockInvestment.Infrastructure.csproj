@@ -12,6 +12,7 @@
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -24,6 +25,7 @@
     <PackageReference Include="Polly.Extensions.Http" Version="3.0.0" />
     <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
+    <PackageReference Include="System.ServiceModel.Syndication" Version="8.0.0" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -31,5 +33,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="StockInvestment.Infrastructure.Tests" />
+  </ItemGroup>
 
 </Project>

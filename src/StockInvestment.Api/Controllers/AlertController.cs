@@ -264,4 +264,3 @@ public class ToggleAlertRequest
 {
     public bool IsActive { get; set; }
 }
-

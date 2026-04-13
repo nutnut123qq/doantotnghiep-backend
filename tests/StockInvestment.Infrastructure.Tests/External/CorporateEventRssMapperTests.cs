@@ -17,7 +17,7 @@ public class CorporateEventRssMapperTests
         };
         item.Links.Add(new SyndicationLink(new Uri("https://example.com/a")));
 
-        var ev = CorporateEventRssMapper.TryMapItem(item, new Dictionary<string, Guid>(), "Feed");
+        var ev = CorporateEventRssMapper.TryMapItem(item, new Dictionary<string, Guid>(), null, "Feed");
         Assert.Null(ev);
     }
 
@@ -35,7 +35,7 @@ public class CorporateEventRssMapperTests
         item.Links.Add(new SyndicationLink(new Uri("https://example.com/fpt-q4")));
         item.PublishDate = new DateTimeOffset(2024, 3, 15, 10, 0, 0, TimeSpan.Zero);
 
-        var ev = CorporateEventRssMapper.TryMapItem(item, map, "TestFeed");
+        var ev = CorporateEventRssMapper.TryMapItem(item, map, null, "TestFeed");
         Assert.NotNull(ev);
         Assert.Equal(fptId, ev!.StockTickerId);
         Assert.Equal(CorporateEventType.Earnings, ev.EventType);
@@ -56,7 +56,7 @@ public class CorporateEventRssMapperTests
         item.Links.Add(new SyndicationLink(new Uri("https://example.com/vic-div")));
         item.PublishDate = DateTimeOffset.UtcNow;
 
-        var ev = CorporateEventRssMapper.TryMapItem(item, map, "TestFeed");
+        var ev = CorporateEventRssMapper.TryMapItem(item, map, null, "TestFeed");
         Assert.NotNull(ev);
         Assert.IsType<DividendEvent>(ev);
         Assert.Equal(CorporateEventType.Dividend, ev!.EventType);

@@ -362,6 +362,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEventRssIngestionService, EventRssIngestionService>();
         services.AddScoped<ICorporateEventService, CorporateEventService>();
         services.AddScoped<ITechnicalIndicatorService, TechnicalIndicatorService>();
+        services.AddScoped<ITechnicalIndicatorQueryService, TechnicalIndicatorQueryService>();
         services.AddScoped<IAdminService, AdminService>();
         services.AddScoped<ISystemHealthService, SystemHealthService>();
         services.AddScoped<IAnalyticsService, AnalyticsService>();
@@ -445,7 +446,8 @@ public static class ServiceCollectionExtensions
                 aiServiceUrl = "http://localhost:8000";
             }
             client.BaseAddress = new Uri(aiServiceUrl);
-            client.Timeout = TimeSpan.FromSeconds(20);
+            // Batch VN30 quotes need more headroom than a single GET; Polly may add retries.
+            client.Timeout = TimeSpan.FromSeconds(90);
         })
         .AddPolicyHandler((serviceProvider, request) =>
         {
@@ -474,6 +476,18 @@ public static class ServiceCollectionExtensions
         .AddPolicyHandler((serviceProvider, request) =>
         {
             var policyService = serviceProvider.GetRequiredService<Infrastructure.Services.ResiliencePolicyService>();
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+            var isInsightGenerate =
+                path.Contains("/api/insights/generate", StringComparison.OrdinalIgnoreCase);
+
+            if (isInsightGenerate)
+            {
+                return policyService.CreateCombinedPolicy(
+                    retryCount: 2,
+                    exceptionsAllowedBeforeBreaking: 5,
+                    durationOfBreak: TimeSpan.FromSeconds(30));
+            }
+
             return policyService.CreateCombinedPolicy(
                 retryCount: 3,
                 exceptionsAllowedBeforeBreaking: 5,

@@ -34,6 +34,22 @@ public class AIInsightGenerationJob : BackgroundService
     {
         _logger.LogInformation("AI Insight Generation Job started");
 
+        if (!_options.Enabled)
+        {
+            _logger.LogInformation(
+                "AI insight generation is disabled (AIInsights:Generation:Enabled=false). Hosted service will idle.");
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // shutdown
+            }
+
+            return;
+        }
+
         // Delay first run to allow system to initialize
         await Task.Delay(TimeSpan.FromMinutes(Math.Max(1, _options.StartupDelayMinutes)), stoppingToken);
 
@@ -158,7 +174,7 @@ public class AIInsightGenerationJob : BackgroundService
 
         var newsCutoff = DateTime.UtcNow.AddMinutes(-Math.Max(10, _options.TriggerNewsLookbackMinutes));
         var recentNewsTickerIds = await dbContext.News
-            .Where(n => n.PublishedAt >= newsCutoff && n.TickerId.HasValue)
+            .Where(n => !n.IsDeleted && n.PublishedAt >= newsCutoff && n.TickerId.HasValue)
             .Select(n => n.TickerId!.Value)
             .Distinct()
             .Take(25)

@@ -15,6 +15,8 @@ public class News
     public string? Summary { get; set; }
     public Sentiment? Sentiment { get; set; }
     public string? ImpactAssessment { get; set; }
+    /// <summary>When true, article is hidden from users but kept for crawler dedupe.</summary>
+    public bool IsDeleted { get; set; }
 
     // Navigation properties
     public StockTicker? Ticker { get; set; }

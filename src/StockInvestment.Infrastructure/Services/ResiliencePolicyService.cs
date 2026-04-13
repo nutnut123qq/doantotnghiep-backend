@@ -3,7 +3,6 @@ using Polly;
 using Polly.CircuitBreaker;
 using Polly.Extensions.Http;
 using Polly.Retry;
-using System.Net;
 
 namespace StockInvestment.Infrastructure.Services;
 
@@ -24,9 +23,9 @@ public class ResiliencePolicyService
     /// </summary>
     public AsyncRetryPolicy<HttpResponseMessage> CreateRetryPolicy(int retryCount = 3)
     {
+        // Do not retry 429 (quota / rate limit): extra attempts usually waste slots without helping.
         return HttpPolicyExtensions
             .HandleTransientHttpError()
-            .OrResult(msg => msg.StatusCode == HttpStatusCode.TooManyRequests)
             .WaitAndRetryAsync(
                 retryCount,
                 retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),

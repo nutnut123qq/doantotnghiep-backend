@@ -110,7 +110,7 @@ public class AdminService : IAdminService
             TotalWatchlists = watchlists.Count(),
             TotalAlerts = alerts.Count(),
             TotalEvents = events.Count(),
-            TotalNews = news.Count(),
+            TotalNews = news.Count(n => !n.IsDeleted),
             LastUpdated = DateTime.UtcNow
         };
     }

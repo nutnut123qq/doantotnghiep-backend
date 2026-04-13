@@ -4,6 +4,9 @@ public class AIInsightGenerationOptions
 {
     public const string SectionName = "AIInsights:Generation";
 
+    /// <summary>When false, the hosted insight job idles (no outbound AI insight generation).</summary>
+    public bool Enabled { get; set; } = true;
+
     // Steady-state profile (balanced, 2-4h freshness)
     public int IntervalMinutes { get; set; } = 120;
     public int StartupDelayMinutes { get; set; } = 5;

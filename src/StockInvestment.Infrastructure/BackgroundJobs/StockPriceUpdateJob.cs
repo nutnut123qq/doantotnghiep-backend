@@ -34,6 +34,17 @@ public class StockPriceUpdateJob : BackgroundService
     {
         _logger.LogInformation("Stock Price Update Job started");
 
+        var initialDelaySeconds = _configuration.GetValue("BackgroundJobs:StockPriceUpdateInitialDelaySeconds", 0);
+        if (initialDelaySeconds < 0) initialDelaySeconds = 0;
+        if (initialDelaySeconds > 600) initialDelaySeconds = 600;
+        if (initialDelaySeconds > 0)
+        {
+            _logger.LogInformation(
+                "Stock price update: waiting {Seconds}s before first run (BackgroundJobs:StockPriceUpdateInitialDelaySeconds)",
+                initialDelaySeconds);
+            await Task.Delay(TimeSpan.FromSeconds(initialDelaySeconds), stoppingToken);
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -156,6 +167,13 @@ public class StockPriceUpdateJob : BackgroundService
         }
 
         var ratio = newPrice > previousPrice ? newPrice / previousPrice : previousPrice / newPrice;
+
+        // DB may still hold thousand-VND style rows vs quotes in full VND (~1000x); allow update.
+        if (ratio is >= 850m and <= 1150m)
+        {
+            return false;
+        }
+
         return ratio >= 20m;
     }
 }

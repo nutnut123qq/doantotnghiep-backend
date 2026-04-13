@@ -31,7 +31,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["JWT:Secret"] = "integration-test-secret-key-at-least-32-characters-long"
+                ["JWT:Secret"] = "integration-test-secret-key-at-least-32-characters-long",
+                ["BackgroundJobs:StockPriceUpdateInitialDelaySeconds"] = "0"
             });
         });
 

@@ -10,6 +10,7 @@ public class PortfolioService : IPortfolioService
     private readonly ILogger<PortfolioService> _logger;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IPortfolioRepository _portfolioRepository;
+    private readonly IStockTickerRepository _stockTickerRepository;
     private readonly IStockDataService _stockDataService;
     private readonly ICacheService _cacheService;
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
@@ -19,6 +20,7 @@ public class PortfolioService : IPortfolioService
         ILogger<PortfolioService> logger,
         IUnitOfWork unitOfWork,
         IPortfolioRepository portfolioRepository,
+        IStockTickerRepository stockTickerRepository,
         IStockDataService stockDataService,
         ICacheService cacheService,
         ICacheKeyGenerator cacheKeyGenerator)
@@ -26,6 +28,7 @@ public class PortfolioService : IPortfolioService
         _logger = logger;
         _unitOfWork = unitOfWork;
         _portfolioRepository = portfolioRepository;
+        _stockTickerRepository = stockTickerRepository;
         _stockDataService = stockDataService;
         _cacheService = cacheService;
         _cacheKeyGenerator = cacheKeyGenerator;
@@ -52,17 +55,16 @@ public class PortfolioService : IPortfolioService
                 return new List<PortfolioHoldingDto>();
             }
 
-            // Batch load all tickers in one query (fix N+1 problem)
+            // Snapshot prices from DB only (VN30 job); no VNStock on GET path
             var symbols = portfoliosList.Select(p => p.Symbol).Distinct().ToList();
-            var tickers = await _stockDataService.GetTickersBySymbolsAsync(symbols);
+            var tickers = await _stockTickerRepository.GetBySymbolsAsync(symbols);
 
             var holdings = new List<PortfolioHoldingDto>();
 
-            foreach (var portfolio in portfolios)
+            foreach (var portfolio in portfoliosList)
             {
-                // Get ticker from batch-loaded dictionary
-                tickers.TryGetValue(portfolio.Symbol, out var ticker);
-                
+                tickers.TryGetValue(portfolio.Symbol.ToUpperInvariant(), out var ticker);
+
                 var currentPrice = ticker?.CurrentPrice ?? portfolio.CurrentPrice;
                 currentPrice = NormalizeCurrentPriceIfNeeded(currentPrice, portfolio.AvgPrice, portfolio.Symbol);
                 var name = ticker?.Name ?? portfolio.Name;
@@ -129,9 +131,8 @@ public class PortfolioService : IPortfolioService
                 return emptySummary;
             }
 
-            // Batch load tickers for current prices
             var symbols = portfoliosList.Select(p => p.Symbol).Distinct().ToList();
-            var tickers = await _stockDataService.GetTickersBySymbolsAsync(symbols);
+            var tickers = await _stockTickerRepository.GetBySymbolsAsync(symbols);
 
             // Calculate summary using aggregation
             decimal totalValue = 0;
@@ -140,7 +141,7 @@ public class PortfolioService : IPortfolioService
 
             foreach (var portfolio in portfoliosList)
             {
-                tickers.TryGetValue(portfolio.Symbol, out var ticker);
+                tickers.TryGetValue(portfolio.Symbol.ToUpperInvariant(), out var ticker);
                 var currentPrice = ticker?.CurrentPrice ?? portfolio.CurrentPrice;
                 currentPrice = NormalizeCurrentPriceIfNeeded(currentPrice, portfolio.AvgPrice, portfolio.Symbol);
                 

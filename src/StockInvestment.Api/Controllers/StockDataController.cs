@@ -19,6 +19,7 @@ public class StockDataController : ControllerBase
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
     private readonly bool _allowMockMarketData;
     private readonly IWebHostEnvironment _environment;
+    private readonly TimeSpan _ohlcvCacheDuration;
 
     public StockDataController(
         IVNStockService vnStockService,
@@ -36,6 +37,10 @@ public class StockDataController : ControllerBase
         _cacheKeyGenerator = cacheKeyGenerator;
         _allowMockMarketData = configuration.GetValue<bool>("Features:AllowMockMarketData", defaultValue: false);
         _environment = environment;
+        var minutes = configuration.GetValue("Features:OHLCVCacheMinutes", 30);
+        if (minutes < 1) minutes = 1;
+        if (minutes > 1440) minutes = 1440;
+        _ohlcvCacheDuration = TimeSpan.FromMinutes(minutes);
     }
 
     /// <summary>
@@ -100,7 +105,7 @@ public class StockDataController : ControllerBase
                         Volume = d.Volume
                     }).OrderBy(d => d.Time).ToList();
                 },
-                TimeSpan.FromMinutes(30)
+                _ohlcvCacheDuration
             );
 
             return Ok(ohlcvData);

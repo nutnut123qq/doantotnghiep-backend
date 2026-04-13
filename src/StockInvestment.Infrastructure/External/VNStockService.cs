@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.IO;
@@ -20,6 +21,7 @@ public class VNStockService : IVNStockService
     private readonly string _aiServiceUrl;
     private const int MaxQuoteConcurrency = 2;
     private const int QuoteTimeoutSeconds = 25;
+    private const int BatchQuoteTimeoutSeconds = 45;
     private const int MaxQuoteRetries = 3;
     private const decimal ThousandVndThreshold = 1_000m;
     private const decimal UnitScale = 1_000m;
@@ -155,6 +157,40 @@ public class VNStockService : IVNStockService
             return Enumerable.Empty<StockTicker>();
         }
 
+        var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+        try
+        {
+            var url = "/api/stock/quotes?source=VCI";
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(BatchQuoteTimeoutSeconds));
+            var response = await _httpClient.PostAsJsonAsync(url, uniqueSymbols, cts.Token);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Batch quotes POST failed with {StatusCode}; falling back to per-symbol quotes.",
+                    (int)response.StatusCode);
+                return await GetQuotesParallelFallbackAsync(uniqueSymbols);
+            }
+
+            var list = await response.Content.ReadFromJsonAsync<List<VNStockQuoteResponse>>(jsonOptions, cts.Token);
+            if (list == null || list.Count == 0)
+            {
+                _logger.LogWarning("Batch quotes returned empty; falling back to per-symbol quotes.");
+                return await GetQuotesParallelFallbackAsync(uniqueSymbols);
+            }
+
+            return list.Select(MapQuoteResponseToTicker);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Batch quotes request failed; falling back to per-symbol quotes.");
+            return await GetQuotesParallelFallbackAsync(uniqueSymbols);
+        }
+    }
+
+    private async Task<IEnumerable<StockTicker>> GetQuotesParallelFallbackAsync(IReadOnlyList<string> uniqueSymbols)
+    {
         var throttler = new SemaphoreSlim(MaxQuoteConcurrency);
         try
         {
@@ -319,6 +355,12 @@ public class VNStockService : IVNStockService
             if (normalizedUnit is "THOUSAND_VND" or "K_VND")
             {
                 return UnitScale;
+            }
+
+            // Python pipeline returns full VND with priceUnit VND; avoid double-scaling on small raw values.
+            if (normalizedUnit is "VND")
+            {
+                return 1m;
             }
         }
 

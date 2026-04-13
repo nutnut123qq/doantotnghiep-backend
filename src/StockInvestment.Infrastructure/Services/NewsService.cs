@@ -29,7 +29,7 @@ public class NewsService : INewsService
 
     public async Task<IEnumerable<News>> GetNewsAsync(int page = 1, int pageSize = 20, Guid? tickerId = null)
     {
-        var query = _context.News.AsQueryable();
+        var query = _context.News.Where(n => !n.IsDeleted);
 
         if (tickerId.HasValue)
         {
@@ -45,9 +45,31 @@ public class NewsService : INewsService
         return news;
     }
 
+    public async Task<IEnumerable<News>> GetNewsForAdminAsync(int page = 1, int pageSize = 20, Guid? tickerId = null)
+    {
+        var query = _context.News.AsQueryable();
+
+        if (tickerId.HasValue)
+        {
+            query = query.Where(n => n.TickerId == tickerId.Value);
+        }
+
+        return await query
+            .OrderByDescending(n => n.PublishedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+    }
+
     public async Task<News?> GetNewsByIdAsync(Guid id)
     {
-        return await _unitOfWork.Repository<News>().GetByIdAsync(id);
+        var news = await _unitOfWork.Repository<News>().GetByIdAsync(id);
+        if (news == null || news.IsDeleted)
+        {
+            return null;
+        }
+
+        return news;
     }
 
     public async Task<IReadOnlyList<NewsItemDto>> GetRecentNewsForSymbolAsync(string symbol, int days = 7, int limit = 5)
@@ -65,6 +87,7 @@ public class NewsService : INewsService
         var sinceDate = DateTime.UtcNow.AddDays(-days);
         var pattern = $"%{normalizedSymbol}%";
         var newsList = await _context.News
+            .Where(n => !n.IsDeleted)
             .Where(n => n.PublishedAt >= sinceDate)
             .Where(n =>
                 n.TickerId == ticker.Id
@@ -136,6 +159,24 @@ public class NewsService : INewsService
         }
     }
 
+    public async Task<bool> SetNewsDeletedAsync(Guid id, bool isDeleted)
+    {
+        var news = await _unitOfWork.Repository<News>().GetByIdAsync(id);
+        if (news == null)
+        {
+            return false;
+        }
+
+        if (news.IsDeleted == isDeleted)
+        {
+            return true;
+        }
+
+        news.IsDeleted = isDeleted;
+        await UpdateNewsAsync(news);
+        return true;
+    }
+
     public async Task<HashSet<string>> GetExistingUrlsAsync()
     {
         var urls = await _context.News
@@ -171,6 +212,7 @@ public class NewsService : INewsService
 
         IQueryable<News> query = _context.News
             .Include(n => n.Ticker)
+            .Where(n => !n.IsDeleted)
             .Where(n => n.PublishedAt >= since);
 
         if (normalizedSymbol != null)

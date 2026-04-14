@@ -1,5 +1,7 @@
 using Serilog;
+using StockInvestment.Infrastructure.Data;
 using StockInvestment.Api.Extensions;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,13 +30,19 @@ builder.Services
 
 var app = builder.Build();
 
-// Configure pipeline using extension methods
-app.ConfigurePipeline()
-   .MapHealthCheckEndpoints()
-   .MapEndpoints();
-
 try
 {
+    using var migrationScope = app.Services.CreateScope();
+    var dbContext = migrationScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+    Log.Information("Applying database migrations");
+    await dbContext.Database.MigrateAsync();
+
+    // Configure pipeline using extension methods
+    app.ConfigurePipeline()
+       .MapHealthCheckEndpoints()
+       .MapEndpoints();
+
     Log.Information("Starting web application");
     app.Run();
 }

@@ -1,26 +1,3 @@
-# Build stage
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
-
-# Copy csproj files and restore dependencies
-COPY ["src/StockInvestment.Api/StockInvestment.Api.csproj", "src/StockInvestment.Api/"]
-COPY ["src/StockInvestment.Application/StockInvestment.Application.csproj", "src/StockInvestment.Application/"]
-COPY ["src/StockInvestment.Domain/StockInvestment.Domain.csproj", "src/StockInvestment.Domain/"]
-COPY ["src/StockInvestment.Infrastructure/StockInvestment.Infrastructure.csproj", "src/StockInvestment.Infrastructure/"]
-COPY ["src/StockInvestment.Shared/StockInvestment.Shared.csproj", "src/StockInvestment.Shared/"]
-
-RUN dotnet restore "src/StockInvestment.Api/StockInvestment.Api.csproj"
-
-# Copy everything else and build
-COPY . .
-WORKDIR "/src/src/StockInvestment.Api"
-RUN dotnet build "StockInvestment.Api.csproj" -c Release -o /app/build
-
-# Publish stage
-FROM build AS publish
-RUN dotnet publish "StockInvestment.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
-
-# Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 
@@ -32,8 +9,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy published app
-COPY --from=publish /app/publish .
+# Copy published app from the GitHub Actions build output
+COPY src/StockInvestment.Api/publish/ .
 
 # Create logs directory
 RUN mkdir -p /app/logs && chown -R appuser:appuser /app

@@ -34,6 +34,13 @@ public class RateLimitingMiddleware
             return;
         }
 
+        // Let CORS preflight through without consuming rate limit budget.
+        if (HttpMethods.IsOptions(context.Request.Method))
+        {
+            await _next(context);
+            return;
+        }
+
         // Skip rate limiting for health checks
         if (context.Request.Path.StartsWithSegments("/health"))
         {

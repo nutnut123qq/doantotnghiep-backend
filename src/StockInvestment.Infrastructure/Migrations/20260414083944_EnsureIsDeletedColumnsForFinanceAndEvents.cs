@@ -10,49 +10,26 @@ namespace StockInvestment.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<bool>(
-                name: "IsDeleted",
-                table: "FinancialReports",
-                type: "boolean",
-                nullable: false,
-                defaultValue: false);
+            migrationBuilder.Sql(
+                "ALTER TABLE \"FinancialReports\" ADD COLUMN IF NOT EXISTS \"IsDeleted\" boolean NOT NULL DEFAULT FALSE;");
 
-            migrationBuilder.AddColumn<bool>(
-                name: "IsDeleted",
-                table: "CorporateEvents",
-                type: "boolean",
-                nullable: false,
-                defaultValue: false);
+            migrationBuilder.Sql(
+                "ALTER TABLE \"CorporateEvents\" ADD COLUMN IF NOT EXISTS \"IsDeleted\" boolean NOT NULL DEFAULT FALSE;");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_FinancialReports_IsDeleted",
-                table: "FinancialReports",
-                column: "IsDeleted");
+            migrationBuilder.Sql(
+                "CREATE INDEX IF NOT EXISTS \"IX_FinancialReports_IsDeleted\" ON \"FinancialReports\" (\"IsDeleted\");");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_CorporateEvents_IsDeleted",
-                table: "CorporateEvents",
-                column: "IsDeleted");
+            migrationBuilder.Sql(
+                "CREATE INDEX IF NOT EXISTS \"IX_CorporateEvents_IsDeleted\" ON \"CorporateEvents\" (\"IsDeleted\");");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropIndex(
-                name: "IX_FinancialReports_IsDeleted",
-                table: "FinancialReports");
-
-            migrationBuilder.DropIndex(
-                name: "IX_CorporateEvents_IsDeleted",
-                table: "CorporateEvents");
-
-            migrationBuilder.DropColumn(
-                name: "IsDeleted",
-                table: "FinancialReports");
-
-            migrationBuilder.DropColumn(
-                name: "IsDeleted",
-                table: "CorporateEvents");
+            migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_FinancialReports_IsDeleted\";");
+            migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_CorporateEvents_IsDeleted\";");
+            migrationBuilder.Sql("ALTER TABLE \"FinancialReports\" DROP COLUMN IF EXISTS \"IsDeleted\";");
+            migrationBuilder.Sql("ALTER TABLE \"CorporateEvents\" DROP COLUMN IF EXISTS \"IsDeleted\";");
         }
     }
 }

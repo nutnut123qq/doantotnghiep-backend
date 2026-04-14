@@ -3,7 +3,7 @@ name: Docker Build Image CI
 on:
   workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
 
 env:
   REGISTRY: ghcr.io

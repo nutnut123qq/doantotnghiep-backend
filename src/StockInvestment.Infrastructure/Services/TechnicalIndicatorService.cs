@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using StockInvestment.Application.DTOs.StockData;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Constants;
 using StockInvestment.Domain.Entities;
@@ -9,17 +10,21 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
 {
     private readonly IVNStockService _vnStockService;
     private readonly ICacheService _cacheService;
+    private readonly ICacheKeyGenerator _cacheKeyGenerator;
     private readonly ILogger<TechnicalIndicatorService> _logger;
     private static readonly TimeSpan IndicatorCacheTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan HistoricalDataCacheTtl = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan OhlcvApiCacheTtl = TimeSpan.FromMinutes(30);
 
     public TechnicalIndicatorService(
         IVNStockService vnStockService,
         ICacheService cacheService,
+        ICacheKeyGenerator cacheKeyGenerator,
         ILogger<TechnicalIndicatorService> logger)
     {
         _vnStockService = vnStockService;
         _cacheService = cacheService;
+        _cacheKeyGenerator = cacheKeyGenerator;
         _logger = logger;
     }
 
@@ -364,6 +369,18 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
             .OrderBy(d => d.Date)
             .ToList();
         await _cacheService.SetAsync(cacheKey, data, HistoricalDataCacheTtl);
+
+        var apiCacheKey = _cacheKeyGenerator.GenerateOHLCVKey(symbol, startDate, endDate);
+        var apiPayload = data.Select(d => new OHLCVResponseDto
+        {
+            Time = new DateTimeOffset(d.Date).ToUnixTimeSeconds(),
+            Open = d.Open,
+            High = d.High,
+            Low = d.Low,
+            Close = d.Close,
+            Volume = d.Volume
+        }).ToList();
+        await _cacheService.SetAsync(apiCacheKey, apiPayload, OhlcvApiCacheTtl);
         return data;
     }
 

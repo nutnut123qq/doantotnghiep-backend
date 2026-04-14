@@ -6,30 +6,42 @@ using StockInvestment.Application.Interfaces;
 namespace StockInvestment.Api.Controllers;
 
 [ApiController]
-[Route("api/admin/news")]
+[Route("api/admin/financial-reports")]
 [Authorize(Roles = "Admin,SuperAdmin")]
-public class AdminNewsController : ControllerBase
+public class AdminFinancialReportsController : ControllerBase
 {
-    private readonly INewsService _newsService;
+    private readonly IFinancialReportService _financialReportService;
 
-    public AdminNewsController(INewsService newsService)
+    public AdminFinancialReportsController(IFinancialReportService financialReportService)
     {
-        _newsService = newsService;
+        _financialReportService = financialReportService;
     }
 
     [HttpGet]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetNews(
+    public async Task<IActionResult> GetReports(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        [FromQuery] Guid? tickerId = null)
+        [FromQuery] string? symbol = null)
     {
         var safePage = Math.Max(page, 1);
         var safePageSize = Math.Clamp(pageSize, 1, 100);
-        var result = await _newsService.GetNewsForAdminAsync(safePage, safePageSize, tickerId);
+        var result = await _financialReportService.GetReportsForAdminAsync(safePage, safePageSize, symbol);
+        var items = result.Items.Select(r => new
+        {
+            r.Id,
+            r.TickerId,
+            symbol = r.Ticker?.Symbol,
+            r.ReportType,
+            r.Year,
+            r.Quarter,
+            r.ReportDate,
+            r.CreatedAt,
+            r.IsDeleted
+        }).Cast<object>().ToList();
         return Ok(new PagedResponse<object>
         {
-            Items = result.Items.Cast<object>().ToList(),
+            Items = items,
             TotalCount = result.TotalCount,
             PageNumber = safePage,
             PageSize = safePageSize
@@ -40,14 +52,14 @@ public class AdminNewsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> SetNewsDeleted(Guid id, [FromBody] SetNewsDeletedRequest? body)
+    public async Task<IActionResult> SetReportDeleted(Guid id, [FromBody] SetFinancialReportDeletedRequest? body)
     {
         if (body == null)
         {
             return BadRequest();
         }
 
-        var updated = await _newsService.SetNewsDeletedAsync(id, body.IsDeleted);
+        var updated = await _financialReportService.SetReportDeletedAsync(id, body.IsDeleted);
         if (!updated)
         {
             return NotFound();
@@ -57,7 +69,7 @@ public class AdminNewsController : ControllerBase
     }
 }
 
-public class SetNewsDeletedRequest
+public class SetFinancialReportDeletedRequest
 {
     public bool IsDeleted { get; set; }
 }

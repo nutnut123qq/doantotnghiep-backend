@@ -19,10 +19,11 @@ public class VNStockService : IVNStockService
     private readonly HttpClient _httpClient;
     private readonly ILogger<VNStockService> _logger;
     private readonly string _aiServiceUrl;
-    private const int MaxQuoteConcurrency = 2;
+    private const int MaxQuoteConcurrency = 1;
+    private static readonly TimeSpan FallbackInterRequestDelay = TimeSpan.FromMilliseconds(250);
     private const int QuoteTimeoutSeconds = 25;
-    private const int BatchQuoteTimeoutSeconds = 45;
-    private const int MaxQuoteRetries = 3;
+    private const int BatchQuoteTimeoutSeconds = 60;
+    private const int MaxQuoteRetries = 2;
     private const decimal ThousandVndThreshold = 1_000m;
     private const decimal UnitScale = 1_000m;
 
@@ -199,7 +200,12 @@ public class VNStockService : IVNStockService
                 await throttler.WaitAsync();
                 try
                 {
-                    return await GetQuoteAsync(symbol);
+                    var quote = await GetQuoteAsync(symbol);
+                    if (FallbackInterRequestDelay > TimeSpan.Zero)
+                    {
+                        await Task.Delay(FallbackInterRequestDelay);
+                    }
+                    return quote;
                 }
                 finally
                 {

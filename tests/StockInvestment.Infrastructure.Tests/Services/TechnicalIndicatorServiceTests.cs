@@ -12,6 +12,7 @@ public class TechnicalIndicatorServiceTests
 {
     private readonly Mock<IVNStockService> _mockVnStockService;
     private readonly Mock<ICacheService> _mockCacheService;
+    private readonly Mock<ICacheKeyGenerator> _mockCacheKeyGenerator;
     private readonly Mock<ILogger<TechnicalIndicatorService>> _mockLogger;
     private readonly TechnicalIndicatorService _service;
 
@@ -19,6 +20,7 @@ public class TechnicalIndicatorServiceTests
     {
         _mockVnStockService = new Mock<IVNStockService>();
         _mockCacheService = new Mock<ICacheService>();
+        _mockCacheKeyGenerator = new Mock<ICacheKeyGenerator>();
         _mockLogger = new Mock<ILogger<TechnicalIndicatorService>>();
         _mockCacheService
             .Setup(x => x.GetAsync<CachedDecimal>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -29,9 +31,13 @@ public class TechnicalIndicatorServiceTests
         _mockCacheService
             .Setup(x => x.GetAsync<List<OHLCVData>>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((List<OHLCVData>?)null);
+        _mockCacheKeyGenerator
+            .Setup(x => x.GenerateOHLCVKey(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Returns((string symbol, DateTime start, DateTime end) => $"ohlcv:{symbol}:{start:yyyyMMdd}:{end:yyyyMMdd}");
         _service = new TechnicalIndicatorService(
             _mockVnStockService.Object,
             _mockCacheService.Object,
+            _mockCacheKeyGenerator.Object,
             _mockLogger.Object);
     }
 

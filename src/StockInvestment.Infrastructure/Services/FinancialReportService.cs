@@ -35,7 +35,7 @@ public class FinancialReportService : IFinancialReportService
     public async Task<IEnumerable<FinancialReport>> GetReportsByTickerAsync(Guid tickerId)
     {
         return await _context.FinancialReports
-            .Where(r => r.TickerId == tickerId)
+            .Where(r => r.TickerId == tickerId && !r.IsDeleted)
             .OrderByDescending(r => r.Year)
             .ThenByDescending(r => r.Quarter)
             .ToListAsync();
@@ -54,6 +54,31 @@ public class FinancialReportService : IFinancialReportService
         return await GetReportsByTickerAsync(ticker.Id);
     }
 
+    public async Task<(IReadOnlyList<FinancialReport> Items, int TotalCount)> GetReportsForAdminAsync(int page = 1, int pageSize = 20, string? symbol = null)
+    {
+        var query = _context.FinancialReports
+            .Include(r => r.Ticker)
+            .AsQueryable();
+
+        var normalizedSymbol = symbol?.Trim().ToUpperInvariant();
+        if (!string.IsNullOrWhiteSpace(normalizedSymbol))
+        {
+            query = query.Where(r => r.Ticker.Symbol == normalizedSymbol);
+        }
+
+        var safePage = Math.Max(page, 1);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+        var totalCount = await query.CountAsync();
+        var items = await query
+            .OrderByDescending(r => r.ReportDate)
+            .ThenByDescending(r => r.Year)
+            .ThenByDescending(r => r.Quarter ?? 0)
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
+            .ToListAsync();
+        return (items, totalCount);
+    }
+
     public async Task<FinancialSnapshotDto?> GetLatestFinancialSnapshotAsync(string symbol)
     {
         var normalizedSymbol = symbol.ToUpperInvariant();
@@ -67,7 +92,7 @@ public class FinancialReportService : IFinancialReportService
         }
 
         var latestReport = await _context.FinancialReports
-            .Where(r => r.TickerId == ticker.Id)
+            .Where(r => r.TickerId == ticker.Id && !r.IsDeleted)
             .OrderByDescending(r => r.ReportDate)
             .ThenByDescending(r => r.Year)
             .ThenByDescending(r => r.Quarter ?? 0)
@@ -99,8 +124,32 @@ public class FinancialReportService : IFinancialReportService
 
     public async Task<FinancialReport?> GetReportByIdAsync(Guid id)
     {
-        return await _unitOfWork.Repository<FinancialReport>()
-            .GetByIdAsync(id);
+        var report = await _unitOfWork.Repository<FinancialReport>().GetByIdAsync(id);
+        if (report == null || report.IsDeleted)
+        {
+            return null;
+        }
+
+        return report;
+    }
+
+    public async Task<bool> SetReportDeletedAsync(Guid id, bool isDeleted)
+    {
+        var report = await _unitOfWork.Repository<FinancialReport>().GetByIdAsync(id);
+        if (report == null)
+        {
+            return false;
+        }
+
+        if (report.IsDeleted == isDeleted)
+        {
+            return true;
+        }
+
+        report.IsDeleted = isDeleted;
+        await _unitOfWork.Repository<FinancialReport>().UpdateAsync(report);
+        await _unitOfWork.SaveChangesAsync();
+        return true;
     }
 
     public async Task<FinancialReport> AddReportAsync(FinancialReport report)

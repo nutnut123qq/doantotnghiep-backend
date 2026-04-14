@@ -43,6 +43,7 @@ public abstract class CorporateEvent
     /// Additional data stored as JSON (event-specific fields)
     /// </summary>
     public string? AdditionalData { get; set; }
+    public bool IsDeleted { get; set; }
     
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

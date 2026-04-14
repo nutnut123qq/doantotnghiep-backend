@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using StockInvestment.Application.DTOs.StockData;
 using StockInvestment.Domain.Constants;
 using StockInvestment.Infrastructure.Hubs;
 using StockInvestment.Application.Interfaces;
@@ -18,7 +19,8 @@ public class StockPriceUpdateJob : BackgroundService
     private readonly ILogger<StockPriceUpdateJob> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
-    private readonly TimeSpan _updateInterval = TimeSpan.FromMinutes(1); // Cập nhật mỗi 1 phút
+    private readonly TimeSpan _updateInterval;
+    private readonly TimeSpan _quoteCacheDuration;
 
     public StockPriceUpdateJob(
         ILogger<StockPriceUpdateJob> logger,
@@ -28,6 +30,10 @@ public class StockPriceUpdateJob : BackgroundService
         _logger = logger;
         _serviceProvider = serviceProvider;
         _configuration = configuration;
+        var updateSeconds = _configuration.GetValue("BackgroundJobs:StockPriceUpdateIntervalSeconds", 60);
+        _updateInterval = TimeSpan.FromSeconds(Math.Clamp(updateSeconds, 10, 3600));
+        var quoteCacheMinutes = _configuration.GetValue("Features:QuoteCacheMinutes", 1);
+        _quoteCacheDuration = TimeSpan.FromMinutes(Math.Clamp(quoteCacheMinutes, 1, 15));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -80,6 +86,8 @@ public class StockPriceUpdateJob : BackgroundService
             var vnStockService = scope.ServiceProvider.GetRequiredService<IVNStockService>();
             var unitOfWork = scope.ServiceProvider.GetRequiredService<StockInvestment.Application.Interfaces.IUnitOfWork>();
             var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<TradingHub>>();
+            var cacheService = scope.ServiceProvider.GetRequiredService<ICacheService>();
+            var cacheKeyGenerator = scope.ServiceProvider.GetRequiredService<ICacheKeyGenerator>();
             var vn30Symbols = Vn30Universe.Symbols;
 
             _logger.LogInformation("Updating prices for {Count} stocks", vn30Symbols.Count);
@@ -139,6 +147,22 @@ public class StockPriceUpdateJob : BackgroundService
             // Chỉ gửi tới group của symbol (clients cần join group để nhận updates)
             foreach (var quote in quotesList)
             {
+                var quoteCacheKey = cacheKeyGenerator.GenerateQuoteKey(quote.Symbol);
+                var quoteDto = new QuoteResponseDto
+                {
+                    Symbol = quote.Symbol,
+                    Name = quote.Name,
+                    Exchange = quote.Exchange.ToString(),
+                    CurrentPrice = quote.CurrentPrice,
+                    PreviousClose = quote.PreviousClose ?? 0,
+                    Change = quote.Change ?? 0,
+                    ChangePercent = quote.ChangePercent ?? 0,
+                    Volume = quote.Volume ?? 0,
+                    LastUpdated = quote.LastUpdated,
+                    IsStale = false,
+                    DataSource = "cache"
+                };
+                await cacheService.SetAsync(quoteCacheKey, quoteDto, _quoteCacheDuration);
                 await hubContext.Clients.Group(quote.Symbol).SendAsync("PriceUpdated", quote, cancellationToken);
             }
 

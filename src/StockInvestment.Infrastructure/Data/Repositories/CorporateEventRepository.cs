@@ -22,6 +22,7 @@ public class CorporateEventRepository : ICorporateEventRepository
     {
         var query = _context.CorporateEvents
             .Include(e => e.StockTicker)
+            .Where(e => !e.IsDeleted)
             .AsQueryable();
 
         if (!string.IsNullOrEmpty(symbol))
@@ -58,14 +59,14 @@ public class CorporateEventRepository : ICorporateEventRepository
     {
         return await _context.CorporateEvents
             .Include(e => e.StockTicker)
-            .FirstOrDefaultAsync(e => e.Id == id);
+            .FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted);
     }
 
     public async Task<IEnumerable<CorporateEvent>> GetByTickerAsync(Guid stockTickerId)
     {
         return await _context.CorporateEvents
             .Include(e => e.StockTicker)
-            .Where(e => e.StockTickerId == stockTickerId)
+            .Where(e => e.StockTickerId == stockTickerId && !e.IsDeleted)
             .OrderByDescending(e => e.EventDate)
             .ToListAsync();
     }
@@ -77,7 +78,7 @@ public class CorporateEventRepository : ICorporateEventRepository
 
         return await _context.CorporateEvents
             .Include(e => e.StockTicker)
-            .Where(e => e.EventDate >= today && e.EventDate <= futureDate && e.Status == EventStatus.Upcoming)
+            .Where(e => !e.IsDeleted && e.EventDate >= today && e.EventDate <= futureDate && e.Status == EventStatus.Upcoming)
             .OrderBy(e => e.EventDate)
             .ToListAsync();
     }
@@ -86,7 +87,7 @@ public class CorporateEventRepository : ICorporateEventRepository
     {
         return await _context.CorporateEvents
             .Include(e => e.StockTicker)
-            .Where(e => e.EventDate >= startDate && e.EventDate <= endDate)
+            .Where(e => !e.IsDeleted && e.EventDate >= startDate && e.EventDate <= endDate)
             .OrderBy(e => e.EventDate)
             .ToListAsync();
     }
@@ -95,7 +96,7 @@ public class CorporateEventRepository : ICorporateEventRepository
     {
         return await _context.CorporateEvents
             .Include(e => e.StockTicker)
-            .Where(e => e.EventType == eventType)
+            .Where(e => !e.IsDeleted && e.EventType == eventType)
             .OrderByDescending(e => e.EventDate)
             .ToListAsync();
     }
@@ -128,6 +129,7 @@ public class CorporateEventRepository : ICorporateEventRepository
     {
         return await _context.CorporateEvents
             .AnyAsync(e => 
+                !e.IsDeleted &&
                 e.StockTickerId == stockTickerId && 
                 e.EventType == eventType && 
                 e.EventDate.Date == eventDate.Date);
@@ -139,7 +141,7 @@ public class CorporateEventRepository : ICorporateEventRepository
             return false;
 
         return await _context.CorporateEvents
-            .AnyAsync(e => e.SourceUrl != null && e.SourceUrl.ToLower() == sourceUrl.ToLower());
+            .AnyAsync(e => !e.IsDeleted && e.SourceUrl != null && e.SourceUrl.ToLower() == sourceUrl.ToLower());
     }
 
     public async Task<IReadOnlyList<CorporateEvent>> GetRecentBySymbolAsync(string symbol, DateTime sinceUtc, int take)
@@ -149,9 +151,67 @@ public class CorporateEventRepository : ICorporateEventRepository
 
         return await _context.CorporateEvents
             .Include(e => e.StockTicker)
-            .Where(e => e.StockTicker.Symbol == normalized && e.EventDate >= sinceUtc.Date)
+            .Where(e => !e.IsDeleted && e.StockTicker.Symbol == normalized && e.EventDate >= sinceUtc.Date)
             .OrderByDescending(e => e.EventDate)
             .Take(cap)
             .ToListAsync();
+    }
+
+    public async Task<(IReadOnlyList<CorporateEvent> Items, int TotalCount)> GetForAdminAsync(
+        int page = 1,
+        int pageSize = 20,
+        string? symbol = null,
+        CorporateEventType? eventType = null,
+        EventStatus? status = null)
+    {
+        var query = _context.CorporateEvents
+            .Include(e => e.StockTicker)
+            .AsQueryable();
+
+        var normalizedSymbol = symbol?.Trim().ToUpperInvariant();
+        if (!string.IsNullOrWhiteSpace(normalizedSymbol))
+        {
+            query = query.Where(e => e.StockTicker.Symbol == normalizedSymbol);
+        }
+
+        if (eventType.HasValue)
+        {
+            query = query.Where(e => e.EventType == eventType.Value);
+        }
+
+        if (status.HasValue)
+        {
+            query = query.Where(e => e.Status == status.Value);
+        }
+
+        var safePage = Math.Max(page, 1);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+        var totalCount = await query.CountAsync();
+        var items = await query
+            .OrderByDescending(e => e.EventDate)
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
+            .ToListAsync();
+        return (items, totalCount);
+    }
+
+    public async Task<bool> SetDeletedAsync(Guid id, bool isDeleted)
+    {
+        var row = await _context.CorporateEvents.FirstOrDefaultAsync(e => e.Id == id);
+        if (row == null)
+        {
+            return false;
+        }
+
+        if (row.IsDeleted == isDeleted)
+        {
+            return true;
+        }
+
+        row.IsDeleted = isDeleted;
+        row.UpdatedAt = DateTime.UtcNow;
+        _context.CorporateEvents.Update(row);
+        await _context.SaveChangesAsync();
+        return true;
     }
 }

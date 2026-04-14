@@ -40,10 +40,16 @@ public class AIInsightsController : ControllerBase
     public async Task<IActionResult> GetInsights(
         [FromQuery] string? type = null,
         [FromQuery] string? symbol = null,
-        [FromQuery] bool includeDismissed = false)
+        [FromQuery] bool includeDismissed = false,
+        [FromQuery] bool includeDeleted = false)
     {
+        if (includeDeleted && !User.IsInRole("Admin") && !User.IsInRole("SuperAdmin"))
+        {
+            return Forbid();
+        }
+
         // Check cache
-        var cacheKey = _cacheKeyGenerator.GenerateInsightsKey(type, symbol, includeDismissed);
+        var cacheKey = _cacheKeyGenerator.GenerateInsightsKey(type, symbol, includeDismissed) + $":deleted:{includeDeleted}";
         var cachedInsights = await _cacheService.GetAsync<List<AIInsightDto>>(cacheKey);
         if (cachedInsights != null)
         {
@@ -59,7 +65,7 @@ public class AIInsightsController : ControllerBase
             }
         }
 
-        var insights = await _insightService.GetInsightsAsync(insightType, symbol, includeDismissed);
+        var insights = await _insightService.GetInsightsAsync(insightType, symbol, includeDismissed, includeDeleted);
 
         // Map to DTO
         var result = insights.Select(MapToDto).ToList();
@@ -103,6 +109,7 @@ public class AIInsightsController : ControllerBase
             StopLoss = i.StopLoss,
             Timestamp = i.GeneratedAt,
             GeneratedAt = i.GeneratedAt,
+            IsDeleted = i.IsDeleted,
             QualityStatus = quality.Status,
             QualityScore = quality.Score,
             Evidence = evidence,
@@ -155,11 +162,7 @@ public class AIInsightsController : ControllerBase
     [Authorize(Policy = "Admin")]
     public async Task<IActionResult> DismissInsight(Guid id)
     {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
-        {
-            return Unauthorized("User ID not found in token");
-        }
+        var userId = GetRequiredUserId();
 
         await _insightService.DismissInsightAsync(id, userId);
 
@@ -168,6 +171,19 @@ public class AIInsightsController : ControllerBase
         await _cacheService.RemoveAsync(_cacheKeyGenerator.GenerateMarketSentimentKey());
 
             return Ok(new DismissInsightResponseDto());
+    }
+
+    [HttpPatch("{id}/deleted")]
+    [Authorize(Policy = "Admin")]
+    public async Task<IActionResult> SetDeletedStatus(Guid id, [FromBody] SetAIInsightDeletedStatusRequest request)
+    {
+        var userId = GetRequiredUserId();
+        await _insightService.SetDeletedStatusAsync(id, request.IsDeleted, userId);
+
+        await _cacheService.RemoveByPatternAsync(_cacheKeyGenerator.GeneratePattern("insights"));
+        await _cacheService.RemoveAsync(_cacheKeyGenerator.GenerateMarketSentimentKey());
+
+        return Ok(new { id, request.IsDeleted });
     }
 
     /// <summary>
@@ -306,5 +322,16 @@ public class AIInsightsController : ControllerBase
         }
 
         return (status, score);
+    }
+
+    private Guid GetRequiredUserId()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            throw new UnauthorizedAccessException("User ID not found in token");
+        }
+
+        return userId;
     }
 }

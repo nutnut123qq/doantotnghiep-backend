@@ -40,6 +40,18 @@ public class ForecastApiTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
+    public async Task GetForecast_InternalAiError_Returns500WithErrorShape()
+    {
+        var response = await _factory.CreateAuthenticatedClient().GetAsync("api/Forecast/ERR500");
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+        Assert.Equal("AI service error", json.RootElement.GetProperty("error").GetString());
+        Assert.Equal("ERR500", json.RootElement.GetProperty("symbol").GetString());
+    }
+
+    [Fact]
     public async Task GetBatchForecasts_WithAuth_ReturnsItemsForAllSymbols()
     {
         var payload = new { symbols = new[] { "VNM", "FPT" }, timeHorizon = "short" };
@@ -50,5 +62,13 @@ public class ForecastApiTests : IClassFixture<CustomWebApplicationFactory>
         using var json = JsonDocument.Parse(body);
         var items = json.RootElement.GetProperty("forecasts");
         Assert.Equal(2, items.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task GetBatchForecasts_WithoutAuth_ReturnsUnauthorized()
+    {
+        var payload = new { symbols = new[] { "VNM" }, timeHorizon = "short" };
+        var response = await _factory.CreateClient().PostAsJsonAsync("api/Forecast/batch", payload);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

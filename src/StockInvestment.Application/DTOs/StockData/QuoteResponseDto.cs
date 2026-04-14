@@ -14,4 +14,6 @@ public class QuoteResponseDto
     public decimal ChangePercent { get; set; }
     public long Volume { get; set; }
     public DateTime LastUpdated { get; set; }
+    public bool IsStale { get; set; }
+    public string DataSource { get; set; } = "cache";
 }

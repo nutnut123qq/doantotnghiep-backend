@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StockInvestment.Infrastructure.Data;
@@ -11,9 +12,11 @@ using StockInvestment.Infrastructure.Data;
 namespace StockInvestment.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260414082604_AddSoftDeleteForFinancialReportsAndCorporateEvents")]
+    partial class AddSoftDeleteForFinancialReportsAndCorporateEvents
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -407,9 +410,6 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.Property<int>("EventType")
                         .HasColumnType("integer");
 
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
                     b.Property<string>("SourceUrl")
                         .HasColumnType("text");
 
@@ -429,8 +429,6 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("EventDate");
-
-                    b.HasIndex("IsDeleted");
 
                     b.HasIndex("StockTickerId");
 
@@ -539,9 +537,6 @@ namespace StockInvestment.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
                     b.Property<int?>("Quarter")
                         .HasColumnType("integer");
 
@@ -559,8 +554,6 @@ namespace StockInvestment.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("IsDeleted");
 
                     b.HasIndex("TickerId");
 

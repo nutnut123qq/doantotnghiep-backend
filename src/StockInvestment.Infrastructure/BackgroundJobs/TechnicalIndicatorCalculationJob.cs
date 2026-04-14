@@ -18,7 +18,8 @@ public class TechnicalIndicatorCalculationJob : BackgroundService
     private readonly ILogger<TechnicalIndicatorCalculationJob> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
-    private readonly TimeSpan _calculationInterval = TimeSpan.FromHours(1); // Tính toán mỗi 1 giờ
+    private readonly TimeSpan _calculationInterval;
+    private readonly TimeSpan _initialDelay;
 
     public TechnicalIndicatorCalculationJob(
         ILogger<TechnicalIndicatorCalculationJob> logger,
@@ -28,14 +29,21 @@ public class TechnicalIndicatorCalculationJob : BackgroundService
         _logger = logger;
         _serviceProvider = serviceProvider;
         _configuration = configuration;
+        var intervalMinutes = _configuration.GetValue("BackgroundJobs:TechnicalIndicatorIntervalMinutes", 60);
+        _calculationInterval = TimeSpan.FromMinutes(Math.Clamp(intervalMinutes, 5, 720));
+        var initialDelaySeconds = _configuration.GetValue("BackgroundJobs:TechnicalIndicatorInitialDelaySeconds", 300);
+        _initialDelay = TimeSpan.FromSeconds(Math.Clamp(initialDelaySeconds, 0, 3600));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Technical Indicator Calculation Job started");
 
-        // Wait 5 minutes before first run
-        await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
+        if (_initialDelay > TimeSpan.Zero)
+        {
+            _logger.LogInformation("Technical indicator job waiting {Delay} before first run", _initialDelay);
+            await Task.Delay(_initialDelay, stoppingToken);
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {

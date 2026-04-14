@@ -12,35 +12,28 @@ namespace StockInvestment.Api.Controllers;
 [Authorize]
 public class StockDataController : ControllerBase
 {
-    private readonly IVNStockService _vnStockService;
     private readonly IStockTickerRepository _stockTickerRepository;
     private readonly ICacheService _cacheService;
     private readonly ILogger<StockDataController> _logger;
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
-    private readonly bool _allowMockMarketData;
-    private readonly IWebHostEnvironment _environment;
-    private readonly TimeSpan _ohlcvCacheDuration;
+    private readonly TimeSpan _quoteCacheDuration;
+    private readonly TimeSpan _quoteStaleThreshold;
+    private readonly TimeSpan _ohlcvStaleThreshold;
 
     public StockDataController(
-        IVNStockService vnStockService,
         IStockTickerRepository stockTickerRepository,
         ICacheService cacheService,
         ILogger<StockDataController> logger,
         ICacheKeyGenerator cacheKeyGenerator,
-        IConfiguration configuration,
-        IWebHostEnvironment environment)
+        IConfiguration configuration)
     {
-        _vnStockService = vnStockService;
         _stockTickerRepository = stockTickerRepository;
         _cacheService = cacheService;
         _logger = logger;
         _cacheKeyGenerator = cacheKeyGenerator;
-        _allowMockMarketData = configuration.GetValue<bool>("Features:AllowMockMarketData", defaultValue: false);
-        _environment = environment;
-        var minutes = configuration.GetValue("Features:OHLCVCacheMinutes", 30);
-        if (minutes < 1) minutes = 1;
-        if (minutes > 1440) minutes = 1440;
-        _ohlcvCacheDuration = TimeSpan.FromMinutes(minutes);
+        _quoteCacheDuration = BuildDuration(configuration.GetValue("Features:QuoteCacheMinutes", 1), 1, 15);
+        _quoteStaleThreshold = BuildDuration(configuration.GetValue("Features:QuoteStaleMinutes", 5), 1, 120);
+        _ohlcvStaleThreshold = BuildDuration(configuration.GetValue("Features:OHLCVStaleMinutes", 60), 5, 10080);
     }
 
     /// <summary>
@@ -63,99 +56,29 @@ public class StockDataController : ControllerBase
             var end = endDate ?? DateTime.Now;
             var cacheKey = _cacheKeyGenerator.GenerateOHLCVKey(symbol, start, end);
 
-            // Get from cache or fetch and cache
-            var ohlcvData = await _cacheService.GetOrSetAsync(
-                cacheKey,
-                async () =>
+            // Read-only request path: do not call VNStock from HTTP requests.
+            var ohlcvData = await _cacheService.GetAsync<List<OHLCVResponseDto>>(cacheKey);
+            if (ohlcvData == null || ohlcvData.Count == 0)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
                 {
-                    _logger.LogDebug("Cache miss for OHLCV data: {CacheKey}, fetching from service", cacheKey);
-                    
-                    var data = await _vnStockService.GetHistoricalDataAsync(symbol, start, end);
-                    
-                    // P0-3: If no data from external service, check feature flag before using mock data
-                    if (data == null || !data.Any())
-                    {
-                        var allowMock = _allowMockMarketData || _environment.IsDevelopment();
-                        if (allowMock)
-                        {
-                            _logger.LogWarning(
-                                "No historical data from external service for {Symbol}, using mock data (AllowMockMarketData={AllowMockMarketData}, IsDevelopment={IsDevelopment})",
-                                symbol,
-                                _allowMockMarketData,
-                                _environment.IsDevelopment());
-                            data = GenerateMockHistoricalData(symbol, start, end);
-                        }
-                        else
-                        {
-                            _logger.LogError(
-                                "No historical data from external service for {Symbol} and mock data is disabled (AllowMockMarketData=false). Returning 503.",
-                                symbol);
-                            throw new InvalidOperationException(
-                                $"Historical data unavailable for symbol {symbol}. External service returned no data and mock data is disabled in production.");
-                        }
-                    }
-                    
-                    return data.Select(d => new OHLCVResponseDto
-                    {
-                        Time = new DateTimeOffset(d.Date).ToUnixTimeSeconds(),
-                        Open = d.Open,
-                        High = d.High,
-                        Low = d.Low,
-                        Close = d.Close,
-                        Volume = d.Volume
-                    }).OrderBy(d => d.Time).ToList();
-                },
-                _ohlcvCacheDuration
-            );
+                    message = $"Historical data for {symbol} is warming up. Try again shortly."
+                });
+            }
+
+            var lastUpdated = DateTimeOffset
+                .FromUnixTimeSeconds(ohlcvData.Max(i => i.Time))
+                .UtcDateTime;
+            var isStale = DateTime.UtcNow - lastUpdated > _ohlcvStaleThreshold;
+            SetDataFreshnessHeaders(isStale, lastUpdated, "cache");
 
             return Ok(ohlcvData);
-        }
-        catch (InvalidOperationException)
-        {
-            // P0-3: Re-throw InvalidOperationException as 503 Service Unavailable
-            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting OHLCV data for {Symbol}", symbol);
             throw; // Let GlobalExceptionHandlerMiddleware handle
         }
-    }
-    
-    private List<OHLCVData> GenerateMockHistoricalData(string symbol, DateTime start, DateTime end)
-    {
-        var data = new List<OHLCVData>();
-        var random = new Random(symbol.GetHashCode());
-        var basePrice = random.Next(50000, 200000) * 1m; // Random base price between 50,000-200,000 VND
-        var currentPrice = basePrice;
-        
-        for (var date = start.Date; date <= end.Date; date = date.AddDays(1))
-        {
-            // Skip weekends
-            if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
-                continue;
-                
-            var changePercent = (decimal)((random.NextDouble() - 0.5) * 0.06); // +/- 3% daily change
-            var open = currentPrice;
-            var close = open * (1 + changePercent);
-            var high = Math.Max(open, close) * (1 + (decimal)(random.NextDouble() * 0.02));
-            var low = Math.Min(open, close) * (1 - (decimal)(random.NextDouble() * 0.02));
-            var volume = random.Next(100000, 10000000);
-            
-            data.Add(new OHLCVData
-            {
-                Date = date,
-                Open = Math.Round(open, 2),
-                High = Math.Round(high, 2),
-                Low = Math.Round(low, 2),
-                Close = Math.Round(close, 2),
-                Volume = volume
-            });
-            
-            currentPrice = close;
-        }
-        
-        return data;
     }
 
     /// <summary>
@@ -177,33 +100,39 @@ public class StockDataController : ControllerBase
             var cachedQuote = await _cacheService.GetAsync<QuoteResponseDto>(cacheKey);
             if (cachedQuote != null)
             {
+                cachedQuote.DataSource = "cache";
+                cachedQuote.IsStale = DateTime.UtcNow - cachedQuote.LastUpdated > _quoteStaleThreshold;
+                SetDataFreshnessHeaders(cachedQuote.IsStale, cachedQuote.LastUpdated, cachedQuote.DataSource);
                 return Ok(cachedQuote);
             }
 
-            // Cache miss - fetch from service
-            _logger.LogDebug("Cache miss for quote data: {CacheKey}, fetching from service", cacheKey);
-            
-            var quote = await _vnStockService.GetQuoteAsync(symbol);
-            if (quote == null)
+            // Read-only request path: fallback to DB snapshot.
+            var dbQuote = await _stockTickerRepository.GetBySymbolAsync(symbol.Trim().ToUpperInvariant());
+            if (dbQuote == null)
             {
-                return NotFound(new { message = $"Quote not found for symbol: {symbol}" });
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    message = $"Quote for {symbol} is warming up. Try again shortly."
+                });
             }
 
             var quoteDto = new QuoteResponseDto
             {
-                Symbol = quote.Symbol,
-                Name = quote.Name,
-                Exchange = quote.Exchange.ToString(),
-                CurrentPrice = quote.CurrentPrice,
-                PreviousClose = quote.PreviousClose ?? 0,
-                Change = quote.Change ?? 0,
-                ChangePercent = quote.ChangePercent ?? 0,
-                Volume = quote.Volume ?? 0,
-                LastUpdated = quote.LastUpdated
+                Symbol = dbQuote.Symbol,
+                Name = dbQuote.Name,
+                Exchange = dbQuote.Exchange.ToString(),
+                CurrentPrice = dbQuote.CurrentPrice,
+                PreviousClose = dbQuote.PreviousClose ?? 0,
+                Change = dbQuote.Change ?? 0,
+                ChangePercent = dbQuote.ChangePercent ?? 0,
+                Volume = dbQuote.Volume ?? 0,
+                LastUpdated = dbQuote.LastUpdated,
+                DataSource = "db",
             };
+            quoteDto.IsStale = DateTime.UtcNow - quoteDto.LastUpdated > _quoteStaleThreshold;
 
-            // Cache the result (5 minutes expiration for real-time data)
-            await _cacheService.SetAsync(cacheKey, quoteDto, TimeSpan.FromMinutes(5));
+            await _cacheService.SetAsync(cacheKey, quoteDto, _quoteCacheDuration);
+            SetDataFreshnessHeaders(quoteDto.IsStale, quoteDto.LastUpdated, quoteDto.DataSource);
 
             return Ok(quoteDto);
         }
@@ -250,6 +179,19 @@ public class StockDataController : ControllerBase
             _logger.LogError(ex, "Error getting symbols");
             throw; // Let GlobalExceptionHandlerMiddleware handle
         }
+    }
+
+    private static TimeSpan BuildDuration(int minutes, int minMinutes, int maxMinutes)
+    {
+        var bounded = Math.Clamp(minutes, minMinutes, maxMinutes);
+        return TimeSpan.FromMinutes(bounded);
+    }
+
+    private void SetDataFreshnessHeaders(bool isStale, DateTime lastUpdated, string source)
+    {
+        Response.Headers["X-Data-Stale"] = isStale ? "true" : "false";
+        Response.Headers["X-Data-Source"] = source;
+        Response.Headers["X-Data-LastUpdated"] = lastUpdated.ToUniversalTime().ToString("O");
     }
 
 }

@@ -8,7 +8,7 @@ public interface INewsService
 {
     Task<IEnumerable<News>> GetNewsAsync(int page = 1, int pageSize = 20, Guid? tickerId = null);
     /// <summary>All news including soft-deleted (admin list).</summary>
-    Task<IEnumerable<News>> GetNewsForAdminAsync(int page = 1, int pageSize = 20, Guid? tickerId = null);
+    Task<(IReadOnlyList<News> Items, int TotalCount)> GetNewsForAdminAsync(int page = 1, int pageSize = 20, Guid? tickerId = null);
     Task<News?> GetNewsByIdAsync(Guid id);
     Task<IReadOnlyList<NewsItemDto>> GetRecentNewsForSymbolAsync(string symbol, int days = 7, int limit = 5);
     Task RequestSummarizationAsync(Guid newsId);

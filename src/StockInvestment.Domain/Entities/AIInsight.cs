@@ -16,6 +16,7 @@ public class AIInsight
     public DateTime GeneratedAt { get; set; }
     public DateTime? DismissedAt { get; set; }
     public Guid? DismissedByUserId { get; set; }
+    public bool IsDeleted { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

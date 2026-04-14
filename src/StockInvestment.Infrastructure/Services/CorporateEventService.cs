@@ -24,6 +24,17 @@ public class CorporateEventService : ICorporateEventService
         _aiService = aiService;
     }
 
+    public Task<(IReadOnlyList<CorporateEvent> Items, int TotalCount)> GetEventsForAdminAsync(
+        int page = 1,
+        int pageSize = 20,
+        string? symbol = null,
+        CorporateEventType? eventType = null,
+        EventStatus? status = null)
+        => _unitOfWork.CorporateEvents.GetForAdminAsync(page, pageSize, symbol, eventType, status);
+
+    public Task<bool> SetEventDeletedAsync(Guid id, bool isDeleted)
+        => _unitOfWork.CorporateEvents.SetDeletedAsync(id, isDeleted);
+
     public async Task<QuestionAnswerResult> AskQuestionAsync(
         string symbol,
         string question,

@@ -112,6 +112,8 @@ public class ApplicationDbContext : DbContext
             .HasDatabaseName("IX_News_PublishedAt");
         
         modelBuilder.Entity<FinancialReport>().ToTable("FinancialReports");
+        modelBuilder.Entity<FinancialReport>()
+            .HasIndex(fr => fr.IsDeleted);
         modelBuilder.Entity<Layout>().ToTable("Layouts");
         modelBuilder.Entity<TechnicalIndicator>().ToTable("TechnicalIndicators");
         modelBuilder.Entity<UserPreference>().ToTable("UserPreferences");
@@ -279,6 +281,9 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<CorporateEvent>()
             .HasIndex(e => new { e.StockTickerId, e.EventDate });
 
+        modelBuilder.Entity<CorporateEvent>()
+            .HasIndex(e => e.IsDeleted);
+
         // Configure UserPreference indexes
         modelBuilder.Entity<UserPreference>()
             .HasIndex(p => new { p.UserId, p.PreferenceKey })
@@ -293,6 +298,9 @@ public class ApplicationDbContext : DbContext
         
         modelBuilder.Entity<AIInsight>()
             .HasIndex(i => i.GeneratedAt);
+
+        modelBuilder.Entity<AIInsight>()
+            .HasIndex(i => i.IsDeleted);
         
         modelBuilder.Entity<AIInsight>()
             .HasIndex(i => new { i.TickerId, i.Type, i.GeneratedAt });

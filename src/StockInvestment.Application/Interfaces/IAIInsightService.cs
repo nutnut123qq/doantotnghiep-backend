@@ -10,6 +10,7 @@ public interface IAIInsightService
         InsightType? type = null,
         string? symbol = null,
         bool includeDismissed = false,
+        bool includeDeleted = false,
         CancellationToken cancellationToken = default);
 
     Task<AIInsight?> GetInsightByIdAsync(Guid id, CancellationToken cancellationToken = default);
@@ -26,6 +27,7 @@ public interface IAIInsightService
         CancellationToken cancellationToken = default);
 
     Task DismissInsightAsync(Guid insightId, Guid userId, CancellationToken cancellationToken = default);
+    Task SetDeletedStatusAsync(Guid insightId, bool isDeleted, Guid userId, CancellationToken cancellationToken = default);
 
     Task<MarketSentiment> GetMarketSentimentAsync(CancellationToken cancellationToken = default);
 

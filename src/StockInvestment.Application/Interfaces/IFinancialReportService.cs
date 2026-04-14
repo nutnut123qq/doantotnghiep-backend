@@ -8,8 +8,10 @@ public interface IFinancialReportService
 {
     Task<IEnumerable<FinancialReport>> GetReportsByTickerAsync(Guid tickerId);
     Task<IEnumerable<FinancialReport>> GetReportsBySymbolAsync(string symbol);
+    Task<(IReadOnlyList<FinancialReport> Items, int TotalCount)> GetReportsForAdminAsync(int page = 1, int pageSize = 20, string? symbol = null);
     Task<FinancialSnapshotDto?> GetLatestFinancialSnapshotAsync(string symbol);
     Task<FinancialReport?> GetReportByIdAsync(Guid id);
+    Task<bool> SetReportDeletedAsync(Guid id, bool isDeleted);
     Task<FinancialReport> AddReportAsync(FinancialReport report);
     Task<IEnumerable<FinancialReport>> AddReportsRangeAsync(IEnumerable<FinancialReport> reports);
     Task<QuestionAnswerResult> AskQuestionAsync(Guid reportId, string question);

@@ -10,6 +10,7 @@ public class FinancialReport
     public string Content { get; set; } = null!; // JSON or structured data
     public DateTime ReportDate { get; set; }
     public DateTime CreatedAt { get; set; }
+    public bool IsDeleted { get; set; }
 
     // Navigation properties
     public StockTicker Ticker { get; set; } = null!;

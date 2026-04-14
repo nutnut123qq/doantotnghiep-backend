@@ -71,4 +71,19 @@ public interface ICorporateEventRepository
     /// Recent events for a symbol (by ticker), ordered newest first.
     /// </summary>
     Task<IReadOnlyList<CorporateEvent>> GetRecentBySymbolAsync(string symbol, DateTime sinceUtc, int take);
+
+    /// <summary>
+    /// Admin list including soft-deleted rows.
+    /// </summary>
+    Task<(IReadOnlyList<CorporateEvent> Items, int TotalCount)> GetForAdminAsync(
+        int page = 1,
+        int pageSize = 20,
+        string? symbol = null,
+        CorporateEventType? eventType = null,
+        EventStatus? status = null);
+
+    /// <summary>
+    /// Sets soft-delete flag. Returns false if id does not exist.
+    /// </summary>
+    Task<bool> SetDeletedAsync(Guid id, bool isDeleted);
 }

@@ -43,14 +43,15 @@ public class AIInsightService : IAIInsightService
         InsightType? type = null,
         string? symbol = null,
         bool includeDismissed = false,
+        bool includeDeleted = false,
         CancellationToken cancellationToken = default)
     {
         if (includeDismissed)
         {
-            return await _aiInsightRepository.GetInsightsAsync(type, symbol, includeDismissed, cancellationToken);
+            return await _aiInsightRepository.GetInsightsAsync(type, symbol, includeDismissed, includeDeleted, cancellationToken);
         }
 
-        return await _aiInsightRepository.GetGlobalLatestInsightsAsync(type, symbol, cancellationToken);
+        return await _aiInsightRepository.GetGlobalLatestInsightsAsync(type, symbol, includeDeleted, cancellationToken);
     }
 
     public async Task<AIInsight?> GetInsightByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -346,6 +347,26 @@ public class AIInsightService : IAIInsightService
             _logger.LogError(ex, "Error dismissing AI insight {Id}", insightId);
             throw;
         }
+    }
+
+    public async Task SetDeletedStatusAsync(Guid insightId, bool isDeleted, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var insight = await _aiInsightRepository.GetByIdAsync(insightId);
+        if (insight == null)
+        {
+            throw new Domain.Exceptions.NotFoundException("AIInsight", insightId);
+        }
+
+        insight.IsDeleted = isDeleted;
+        insight.UpdatedAt = DateTime.UtcNow;
+        if (isDeleted)
+        {
+            insight.DismissedAt ??= DateTime.UtcNow;
+            insight.DismissedByUserId ??= userId;
+        }
+
+        await _aiInsightRepository.UpdateAsync(insight);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<MarketSentiment> GetMarketSentimentAsync(CancellationToken cancellationToken = default)

@@ -15,6 +15,7 @@ public interface IAIInsightRepository : IRepository<AIInsight>
         InsightType? type = null,
         string? symbol = null,
         bool includeDismissed = false,
+        bool includeDeleted = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -46,10 +47,11 @@ public interface IAIInsightRepository : IRepository<AIInsight>
     Task<DateTime?> GetLatestGeneratedAtByTickerAsync(Guid tickerId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Get global feed: latest active insight per (symbol, type).
+    /// Get global feed: latest active insight per symbol.
     /// </summary>
     Task<IEnumerable<AIInsight>> GetGlobalLatestInsightsAsync(
         InsightType? type = null,
         string? symbol = null,
+        bool includeDeleted = false,
         CancellationToken cancellationToken = default);
 }

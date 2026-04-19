@@ -16,4 +16,9 @@ public interface IEmailVerificationTokenRepository : IRepository<EmailVerificati
     /// Get active token for user
     /// </summary>
     Task<EmailVerificationToken?> GetActiveTokenByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Mark every unused verification token for the user as used (no persistence — caller saves).
+    /// </summary>
+    Task InvalidateUnusedTokensForUserAsync(Guid userId, CancellationToken cancellationToken = default);
 }

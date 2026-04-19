@@ -1,7 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using StockInvestment.Application.Features.Auth.Register;
+using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Entities;
+using StockInvestment.Domain.Enums;
+using StockInvestment.Domain.ValueObjects;
+using StockInvestment.Infrastructure.Data;
 using StockInvestment.Api.Tests.Helpers;
 using Xunit;
 using System.Text.Json;
@@ -111,5 +117,82 @@ public class AuthApiTests : IClassFixture<CustomWebApplicationFactory>
     {
         var response = await Client.PostAsync("api/auth/verify-email?token=", null);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_ExistingVerifiedUser_ReturnsConflict()
+    {
+        var email = $"verified-{Guid.NewGuid():N}@example.com";
+        const string password = "Test123!@#";
+        SeedUser(email, password, isEmailVerified: true);
+
+        var command = new RegisterCommand
+        {
+            Email = email,
+            Password = password,
+            ConfirmPassword = password
+        };
+
+        var response = await Client.PostAsJsonAsync("api/auth/register", command);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_ExistingUnverifiedUser_SamePassword_ReturnsOk()
+    {
+        var email = $"unverified-{Guid.NewGuid():N}@example.com";
+        const string password = "Test123!@#";
+        var userId = SeedUser(email, password, isEmailVerified: false);
+
+        var command = new RegisterCommand
+        {
+            Email = email,
+            Password = password,
+            ConfirmPassword = password
+        };
+
+        var response = await Client.PostAsJsonAsync("api/auth/register", command);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var dto = await response.Content.ReadFromJsonAsync<RegisterDto>();
+        Assert.NotNull(dto);
+        Assert.Equal(userId, dto!.UserId);
+        Assert.Equal(email, dto.Email);
+    }
+
+    [Fact]
+    public async Task Register_ExistingUnverifiedUser_WrongPassword_ReturnsUnauthorized()
+    {
+        var email = $"unverified-wrong-{Guid.NewGuid():N}@example.com";
+        const string password = "Test123!@#";
+        SeedUser(email, password, isEmailVerified: false);
+
+        var command = new RegisterCommand
+        {
+            Email = email,
+            Password = "Different999!!",
+            ConfirmPassword = "Different999!!"
+        };
+
+        var response = await Client.PostAsJsonAsync("api/auth/register", command);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    private Guid SeedUser(string email, string password, bool isEmailVerified)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+        var user = new User
+        {
+            Email = Email.Create(email),
+            PasswordHash = hasher.HashPassword(password),
+            Role = UserRole.Investor,
+            IsEmailVerified = isEmailVerified,
+            IsActive = true
+        };
+        db.Users.Add(user);
+        db.SaveChanges();
+        return user.Id;
     }
 }

@@ -1,5 +1,4 @@
 using StockInvestment.Application.Contracts.AI;
-using StockInvestment.Application.DTOs.AnalysisReports;
 using System.Text.Json.Serialization;
 
 namespace StockInvestment.Application.Interfaces;
@@ -8,8 +7,6 @@ public interface IAIService
 {
     Task<string> SummarizeNewsAsync(string newsContent, CancellationToken cancellationToken = default);
     Task<NewsSummaryResult> SummarizeNewsDetailedAsync(string newsContent, CancellationToken cancellationToken = default);
-    Task<string> AnalyzeEventAsync(string eventDescription, CancellationToken cancellationToken = default);
-    Task<EventAnalysisResult> AnalyzeEventDetailedAsync(string eventDescription, CancellationToken cancellationToken = default);
     [Obsolete("Use GenerateForecastBySymbolAsync instead. Guid-based forecast contract is legacy.")]
     Task<object> GenerateForecastAsync(Guid tickerId, CancellationToken cancellationToken = default);
     Task<ForecastResult> GenerateForecastBySymbolAsync(string symbol, string timeHorizon = "short", CancellationToken cancellationToken = default);
@@ -35,22 +32,7 @@ public interface IAIService
         string text,
         object metadata,
         CancellationToken cancellationToken = default);
-    Task<ParsedAlert> ParseAlertAsync(string naturalLanguageInput, CancellationToken cancellationToken = default);
     Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Answer a question with provided context parts (for Analysis Reports Q&A)
-    /// </summary>
-    Task<AnswerWithContextResult> AnswerWithContextPartsAsync(string question, List<ContextPart> contextParts, CancellationToken cancellationToken = default);
-}
-
-public class ParsedAlert
-{
-    public string Symbol { get; set; } = string.Empty;
-    public string Type { get; set; } = string.Empty;
-    public string Operator { get; set; } = string.Empty;
-    public decimal Value { get; set; }
-    public string? Timeframe { get; set; }
 }
 
 public class ForecastResult
@@ -100,11 +82,5 @@ public class NewsSummaryResult
     public string Sentiment { get; set; } = string.Empty; // positive, negative, neutral
     public string ImpactAssessment { get; set; } = string.Empty;
     public List<string>? KeyPoints { get; set; }
-}
-
-public class EventAnalysisResult
-{
-    public string Analysis { get; set; } = string.Empty;
-    public string Impact { get; set; } = string.Empty;
 }
 

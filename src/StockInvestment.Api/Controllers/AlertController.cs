@@ -6,7 +6,6 @@ using StockInvestment.Application.Features.Alerts.GetAlerts;
 using StockInvestment.Application.Features.Alerts.UpdateAlert;
 using StockInvestment.Application.Features.Alerts.DeleteAlert;
 using StockInvestment.Application.Features.Alerts.ToggleAlert;
-using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Enums;
 using StockInvestment.Domain.Exceptions;
 using System.Security.Claims;
@@ -19,13 +18,11 @@ namespace StockInvestment.Api.Controllers;
 public class AlertController : ControllerBase
 {
     private readonly IMediator _mediator;
-    private readonly IAIService _aiService;
     private readonly ILogger<AlertController> _logger;
 
-    public AlertController(IMediator mediator, IAIService aiService, ILogger<AlertController> logger)
+    public AlertController(IMediator mediator, ILogger<AlertController> logger)
     {
         _mediator = mediator;
-        _aiService = aiService;
         _logger = logger;
     }
 
@@ -52,30 +49,7 @@ public class AlertController : ControllerBase
     }
 
     /// <summary>
-    /// Parse natural language alert input without creating the alert
-    /// </summary>
-    [HttpPost("parse")]
-    public async Task<IActionResult> ParseAlert([FromBody] ParseAlertRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.NaturalLanguageInput))
-        {
-            return BadRequest("NaturalLanguageInput is required");
-        }
-
-        try
-        {
-            var parsedAlert = await _aiService.ParseAlertAsync(request.NaturalLanguageInput);
-            return Ok(parsedAlert);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error parsing alert");
-            return BadRequest(ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Create a new alert (with NLP support)
+    /// Create a new alert
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> CreateAlert([FromBody] CreateAlertRequest request)
@@ -90,7 +64,6 @@ public class AlertController : ControllerBase
         {
             UserId = userId,
             Symbol = request.Symbol,
-            NaturalLanguageInput = request.NaturalLanguageInput,
             Type = request.Type,
             Condition = request.Condition,
             Threshold = request.Threshold,
@@ -236,15 +209,9 @@ public class AlertController : ControllerBase
     }
 }
 
-public class ParseAlertRequest
-{
-    public string NaturalLanguageInput { get; set; } = string.Empty;
-}
-
 public class CreateAlertRequest
 {
     public string? Symbol { get; set; }
-    public string? NaturalLanguageInput { get; set; }
     public AlertType? Type { get; set; }
     public string? Condition { get; set; }
     public decimal? Threshold { get; set; }

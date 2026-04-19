@@ -1,13 +1,14 @@
+using MailKit.Net.Smtp;
+using MailKit.Security;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using MimeKit;
 using StockInvestment.Application.Interfaces;
-using System.Net;
-using System.Net.Mail;
 
 namespace StockInvestment.Infrastructure.Services;
 
 /// <summary>
-/// SMTP-based email service implementation
+/// SMTP-based email service (MailKit) — reliable STARTTLS with providers like Brevo.
 /// </summary>
 public class EmailService : IEmailService
 {
@@ -39,7 +40,7 @@ public class EmailService : IEmailService
         try
         {
             var verificationLink = $"{_baseUrl}/verify-email?token={verificationToken}";
-            
+
             var subject = "Verify Your Email Address";
             var body = $@"
 <!DOCTYPE html>
@@ -84,7 +85,7 @@ public class EmailService : IEmailService
         try
         {
             var resetLink = $"{_baseUrl}/reset-password?token={resetToken}";
-            
+
             var subject = "Reset Your Password";
             var body = $@"
 <!DOCTYPE html>
@@ -102,10 +103,10 @@ public class EmailService : IEmailService
     <div class='container'>
         <h2>Password Reset Request</h2>
         <p>You requested to reset your password. Click the button below to reset it:</p>
-        <a href='{resetLink}' class='button'>Reset Password</a>
+        <a href='{resetLink}' class='button'>Reset Your Password</a>
         <p>Or copy and paste this link into your browser:</p>
         <p>{resetLink}</p>
-        <p>This link will expire in 1 hour.</p>
+        <p>This link will expire in 30 minutes.</p>
         <div class='footer'>
             <p>If you did not request a password reset, please ignore this email.</p>
         </div>
@@ -125,27 +126,30 @@ public class EmailService : IEmailService
 
     private async Task SendEmailAsync(string toEmail, string subject, string body, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(_smtpUsername) || string.IsNullOrEmpty(_smtpPassword))
+        if (string.IsNullOrWhiteSpace(_smtpUsername) || string.IsNullOrWhiteSpace(_smtpPassword))
         {
-            _logger.LogWarning("Email service not configured. Skipping email to {Email}", toEmail);
-            return; // Don't throw in development if email is not configured
+            throw new InvalidOperationException(
+                "Email is not configured: set EmailSettings:Username and EmailSettings:Password (e.g. in appsettings.Development.json or user secrets).");
         }
 
-        using var client = new SmtpClient(_smtpServer, _smtpPort)
-        {
-            Credentials = new NetworkCredential(_smtpUsername, _smtpPassword),
-            EnableSsl = _enableSsl
-        };
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress(_senderName, _senderEmail));
+        message.To.Add(MailboxAddress.Parse(toEmail));
+        message.Subject = subject;
+        message.Body = new TextPart("html") { Text = body };
 
-        using var message = new MailMessage
-        {
-            From = new MailAddress(_senderEmail, _senderName),
-            To = { new MailAddress(toEmail) },
-            Subject = subject,
-            Body = body,
-            IsBodyHtml = true
-        };
+        using var client = new SmtpClient();
 
-        await client.SendMailAsync(message, cancellationToken);
+        var secure =
+            _smtpPort == 465
+                ? SecureSocketOptions.SslOnConnect
+                : _enableSsl
+                    ? SecureSocketOptions.StartTls
+                    : SecureSocketOptions.None;
+
+        await client.ConnectAsync(_smtpServer, _smtpPort, secure, cancellationToken);
+        await client.AuthenticateAsync(_smtpUsername, _smtpPassword, cancellationToken);
+        await client.SendAsync(message, cancellationToken);
+        await client.DisconnectAsync(true, cancellationToken);
     }
 }

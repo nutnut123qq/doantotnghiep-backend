@@ -1,5 +1,4 @@
 using StockInvestment.Application.Contracts.AI;
-using StockInvestment.Application.DTOs.AnalysisReports;
 using StockInvestment.Application.Interfaces;
 
 namespace StockInvestment.Api.Tests.Mocks;
@@ -21,12 +20,6 @@ public sealed class MockAIService : IAIService
 
     public Task<NewsSummaryResult> SummarizeNewsDetailedAsync(string newsContent, CancellationToken cancellationToken = default)
         => Task.FromResult(new NewsSummaryResult { Summary = "S", Sentiment = "neutral", ImpactAssessment = "" });
-
-    public Task<string> AnalyzeEventAsync(string eventDescription, CancellationToken cancellationToken = default)
-        => Task.FromResult("Analysis");
-
-    public Task<EventAnalysisResult> AnalyzeEventDetailedAsync(string eventDescription, CancellationToken cancellationToken = default)
-        => Task.FromResult(new EventAnalysisResult { Analysis = "A", Impact = "" });
 
     public Task<object> GenerateForecastAsync(Guid tickerId, CancellationToken cancellationToken = default)
         => Task.FromResult<object>(new ForecastResult { Symbol = "X", Trend = "Sideways", TimeHorizon = "short" });
@@ -81,12 +74,6 @@ public sealed class MockAIService : IAIService
     public Task<IngestResult> IngestDocumentAsync(string documentId, string source, string text, object metadata, CancellationToken cancellationToken = default)
         => Task.FromResult(new IngestResult { DocumentId = documentId, ChunksUpserted = 0, Collection = "", EmbeddingModel = "" });
 
-    public Task<ParsedAlert> ParseAlertAsync(string naturalLanguageInput, CancellationToken cancellationToken = default)
-        => Task.FromResult(new ParsedAlert { Symbol = "VNM", Type = "Price", Operator = ">", Value = 100 });
-
     public Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default)
         => Task.FromResult(new InsightResult { Symbol = symbol, Type = "Hold", Title = "", Description = "" });
-
-    public Task<AnswerWithContextResult> AnswerWithContextPartsAsync(string question, List<ContextPart> contextParts, CancellationToken cancellationToken = default)
-        => Task.FromResult(new AnswerWithContextResult { Answer = "", UsedSources = new List<int>() });
 }

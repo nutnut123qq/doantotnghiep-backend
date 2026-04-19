@@ -21,4 +21,10 @@ public class AIInsightGenerationOptions
     public int WarmupIntervalMinutes { get; set; } = 60;
     public int WarmupMaxGeneratePerRun { get; set; } = 15;
     public int WarmupMinInsightTtlMinutes { get; set; } = 60;
+
+    /// <summary>
+    /// Delay between per-ticker insight generations to avoid saturating the
+    /// upstream LLM (Beeknoee free tier = 5 req/min, 1 concurrent). 0 disables.
+    /// </summary>
+    public int InterTickerDelayMs { get; set; } = 500;
 }

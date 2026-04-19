@@ -7,7 +7,6 @@ public partial class AIServiceClient
 {
     public async Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default)
     {
-        EnsureBaseAddressConfigured();
         var request = new
         {
             symbol,
@@ -16,8 +15,16 @@ public partial class AIServiceClient
             sentiment_data = sentimentData ?? new Dictionary<string, string>()
         };
 
+        // Use dedicated client with long timeout so slow LLM calls (Beeknoee rate-limit
+        // queueing) do not trip the default AIServiceClient 120s timeout.
+        var insightClient = _httpClientFactory.CreateClient("AIInsightService");
+        if (insightClient.BaseAddress == null)
+        {
+            throw new InvalidOperationException("AIInsightService HttpClient BaseAddress is not configured. Please check AIService configuration.");
+        }
+
         var endpoint = "/api/insights/generate";
-        var response = await _httpClient.PostAsJsonAsync(endpoint, request, cancellationToken);
+        var response = await insightClient.PostAsJsonAsync(endpoint, request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             await HandleHttpErrorAsync(response, endpoint, symbol);

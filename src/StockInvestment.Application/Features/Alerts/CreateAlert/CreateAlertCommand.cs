@@ -7,7 +7,6 @@ public class CreateAlertCommand : IRequest<CreateAlertResponse>
 {
     public Guid UserId { get; set; }
     public string? Symbol { get; set; }
-    public string? NaturalLanguageInput { get; set; } // "Notify me when VIC reaches 100,000"
     public AlertType? Type { get; set; }
     public string? Condition { get; set; }
     public decimal? Threshold { get; set; }

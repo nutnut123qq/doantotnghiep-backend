@@ -225,60 +225,6 @@ public class WorkspaceController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Get shared layouts in workspace
-    /// </summary>
-    [HttpGet("{id}/layouts")]
-    public async Task<IActionResult> GetSharedLayouts(Guid id)
-    {
-        var userId = GetRequiredUserId();
-        try
-        {
-            var layouts = await _workspaceService.GetSharedLayoutsAsync(id, userId);
-            return Ok(layouts);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return Forbid();
-        }
-    }
-
-    /// <summary>
-    /// Add layout to workspace
-    /// </summary>
-    [HttpPost("{id}/layouts")]
-    public async Task<IActionResult> AddLayout(Guid id, [FromBody] AddLayoutRequest request)
-    {
-        var userId = GetRequiredUserId();
-        try
-        {
-            await _workspaceService.AddLayoutAsync(id, request.LayoutId, userId);
-            return NoContent();
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return Forbid();
-        }
-    }
-
-    /// <summary>
-    /// Remove layout from workspace
-    /// </summary>
-    [HttpDelete("{id}/layouts/{layoutId}")]
-    public async Task<IActionResult> RemoveLayout(Guid id, Guid layoutId)
-    {
-        var userId = GetRequiredUserId();
-        try
-        {
-            await _workspaceService.RemoveLayoutAsync(id, layoutId, userId);
-            return NoContent();
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return Forbid();
-        }
-    }
-
     private Guid GetRequiredUserId()
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -318,10 +264,5 @@ public class UpdateMemberRoleRequest
 public class AddWatchlistRequest
 {
     public Guid WatchlistId { get; set; }
-}
-
-public class AddLayoutRequest
-{
-    public Guid LayoutId { get; set; }
 }
 

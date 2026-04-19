@@ -51,6 +51,30 @@ public sealed class LangGraphForecastMapper : ILangGraphForecastMapper
         return "Sideways";
     }
 
+    private const int KeyDriverMaxChars = 360;
+
+    private static string TruncateDriver(string text)
+    {
+        var t = (text ?? "").Trim();
+        if (t.Length <= KeyDriverMaxChars)
+            return t;
+        return string.Concat(t.AsSpan(0, KeyDriverMaxChars - 1), "…");
+    }
+
+    private static void AddDriverIfRoom(List<string> list, string line)
+    {
+        if (list.Count >= 5 || string.IsNullOrWhiteSpace(line))
+            return;
+        var normalized = line.Trim();
+        foreach (var existing in list)
+        {
+            if (string.Equals(existing, normalized, StringComparison.Ordinal))
+                return;
+        }
+
+        list.Add(normalized);
+    }
+
     private static List<string> BuildKeyDrivers(LangGraphAnalyzeResponse r)
     {
         var list = new List<string>();
@@ -59,15 +83,56 @@ public sealed class LangGraphForecastMapper : ILangGraphForecastMapper
         {
             var title = (item.Title ?? "").Trim();
             var snippet = (item.Snippet ?? "").Trim();
-            if (string.IsNullOrEmpty(title) && string.IsNullOrEmpty(snippet))
+            var why = (item.WhyItMatters ?? "").Trim();
+
+            if (!string.IsNullOrEmpty(title) || !string.IsNullOrEmpty(snippet))
+            {
+                var line = string.IsNullOrEmpty(snippet) ? title : $"{title}: {snippet}";
+                AddDriverIfRoom(list, TruncateDriver(line));
                 continue;
-            var line = string.IsNullOrEmpty(snippet) ? title : $"{title}: {snippet}";
-            list.Add(line.Trim());
+            }
+
+            if (!string.IsNullOrEmpty(why))
+            {
+                var sentiment = (item.Sentiment ?? "").Trim();
+                var line = string.IsNullOrEmpty(sentiment)
+                    ? why
+                    : $"{sentiment}: {why}";
+                AddDriverIfRoom(list, TruncateDriver(line));
+            }
         }
 
         var ds = r.DebateSummary;
-        if (ds != null && list.Count < 5 && !string.IsNullOrWhiteSpace(ds.FinalDecision))
-            list.Add($"Quyết định tổng hợp: {ds.FinalDecision.Trim()}");
+        if (ds != null)
+        {
+            AddDriverIfRoom(list, string.IsNullOrWhiteSpace(ds.FinalDecision)
+                ? ""
+                : $"Quyết định tổng hợp: {TruncateDriver(ds.FinalDecision)}");
+            AddDriverIfRoom(list, string.IsNullOrWhiteSpace(ds.NewsAgent)
+                ? ""
+                : $"Tóm tắt góc tin: {TruncateDriver(ds.NewsAgent)}");
+            AddDriverIfRoom(list, string.IsNullOrWhiteSpace(ds.TechAgent)
+                ? ""
+                : $"Tóm tắt góc kỹ thuật: {TruncateDriver(ds.TechAgent)}");
+        }
+
+        var tech = r.TechEvidence;
+        if (tech != null && list.Count < 5 &&
+            (tech.ChangePct.HasValue || tech.Rsi.HasValue || tech.LastClose.HasValue))
+        {
+            var parts = new List<string>();
+            if (tech.ChangePct.HasValue)
+                parts.Add(FormattableString.Invariant($"biến động {tech.ChangePct:F2}%"));
+            if (tech.Rsi.HasValue)
+                parts.Add(FormattableString.Invariant($"RSI {tech.Rsi:F1}"));
+            if (tech.LastClose.HasValue)
+                parts.Add(FormattableString.Invariant($"giá đóng cửa gần nhất {tech.LastClose:F2}"));
+            if (parts.Count > 0)
+                AddDriverIfRoom(list, "Chỉ báo kỹ thuật: " + string.Join(", ", parts));
+        }
+
+        if (list.Count == 0 && !string.IsNullOrWhiteSpace(r.Reasoning))
+            AddDriverIfRoom(list, "Luận điểm: " + TruncateDriver(r.Reasoning!));
 
         return list;
     }

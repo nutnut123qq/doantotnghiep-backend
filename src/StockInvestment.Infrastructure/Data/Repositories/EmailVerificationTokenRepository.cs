@@ -24,4 +24,18 @@ public class EmailVerificationTokenRepository : Repository<EmailVerificationToke
             .OrderByDescending(t => t.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
     }
+
+    public async Task InvalidateUnusedTokensForUserAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var unused = await _context.Set<EmailVerificationToken>()
+            .Where(t => t.UserId == userId && !t.IsUsed)
+            .ToListAsync(cancellationToken);
+
+        var now = DateTime.UtcNow;
+        foreach (var token in unused)
+        {
+            token.IsUsed = true;
+            token.UsedAt = now;
+        }
+    }
 }

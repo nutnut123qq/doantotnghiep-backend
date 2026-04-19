@@ -19,13 +19,21 @@ public class VNStockService : IVNStockService
     private readonly HttpClient _httpClient;
     private readonly ILogger<VNStockService> _logger;
     private readonly string _aiServiceUrl;
+    private readonly string _marketDataSource;
     private const int MaxQuoteConcurrency = 1;
     private static readonly TimeSpan FallbackInterRequestDelay = TimeSpan.FromMilliseconds(250);
     private const int QuoteTimeoutSeconds = 25;
     private const int BatchQuoteTimeoutSeconds = 60;
+    private const int HistoryTimeoutSeconds = 30;
     private const int MaxQuoteRetries = 2;
     private const decimal ThousandVndThreshold = 1_000m;
     private const decimal UnitScale = 1_000m;
+    private const string DefaultMarketDataSource = "KBS";
+    private static readonly HashSet<string> SupportedMarketDataSources = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "KBS",
+        "VCI",
+    };
 
     public VNStockService(
         IHttpClientFactory httpClientFactory,
@@ -35,6 +43,7 @@ public class VNStockService : IVNStockService
         _httpClient = httpClientFactory.CreateClient("MarketDataAIService");
         _logger = logger;
         _aiServiceUrl = configuration["AIService:BaseUrl"] ?? "http://localhost:8000";
+        _marketDataSource = ResolveMarketDataSource(configuration);
     }
 
     public async Task<IEnumerable<StockTicker>> GetAllSymbolsAsync(string? exchange = null)
@@ -89,7 +98,7 @@ public class VNStockService : IVNStockService
         {
             try
             {
-                var url = $"/api/stock/quote/{symbol}";
+                var url = BuildStockPath($"/api/stock/quote/{symbol}");
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(QuoteTimeoutSeconds));
                 var response = await _httpClient.GetAsync(url, cts.Token);
                 response.EnsureSuccessStatusCode();
@@ -162,7 +171,7 @@ public class VNStockService : IVNStockService
 
         try
         {
-            var url = "/api/stock/quotes?source=VCI";
+            var url = BuildStockPath("/api/stock/quotes");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(BatchQuoteTimeoutSeconds));
             var response = await _httpClient.PostAsJsonAsync(url, uniqueSymbols, cts.Token);
 
@@ -226,11 +235,12 @@ public class VNStockService : IVNStockService
     {
         try
         {
-            var url = $"/api/stock/history/{symbol}?start_date={startDate:yyyy-MM-dd}&end_date={endDate:yyyy-MM-dd}";
-            var response = await _httpClient.GetAsync(url);
+            var url = BuildStockPath($"/api/stock/history/{symbol}?start_date={startDate:yyyy-MM-dd}&end_date={endDate:yyyy-MM-dd}");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(HistoryTimeoutSeconds));
+            var response = await _httpClient.GetAsync(url, cts.Token);
             response.EnsureSuccessStatusCode();
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(cts.Token);
             var dataList = JsonSerializer.Deserialize<List<VNStockHistoricalData>>(content, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -283,7 +293,7 @@ public class VNStockService : IVNStockService
                 };
             });
         }
-        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException || !ex.CancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning("Timeout fetching historical data for {Symbol}. The VNStock API may be slow or unavailable.", symbol);
             return Enumerable.Empty<OHLCVData>();
@@ -309,6 +319,35 @@ public class VNStockService : IVNStockService
             "UPCOM" => Exchange.UPCOM,
             _ => Exchange.HOSE
         };
+    }
+
+    private string BuildStockPath(string basePath)
+    {
+        var separator = basePath.Contains('?') ? "&" : "?";
+        return $"{basePath}{separator}source={_marketDataSource}";
+    }
+
+    private string ResolveMarketDataSource(IConfiguration configuration)
+    {
+        var configuredSource =
+            configuration["MarketData:DefaultSource"]
+            ?? configuration["AIService:MarketDataSource"]
+            ?? Environment.GetEnvironmentVariable("MARKET_DATA_DEFAULT_SOURCE")
+            ?? Environment.GetEnvironmentVariable("VNSTOCK_SOURCE")
+            ?? DefaultMarketDataSource;
+
+        var normalizedSource = configuredSource.Trim().ToUpperInvariant();
+        if (!SupportedMarketDataSources.Contains(normalizedSource))
+        {
+            _logger.LogWarning(
+                "Unsupported market data source '{Source}'. Falling back to {DefaultSource}.",
+                configuredSource,
+                DefaultMarketDataSource);
+            normalizedSource = DefaultMarketDataSource;
+        }
+
+        _logger.LogInformation("VNStockService using market data source: {Source}", normalizedSource);
+        return normalizedSource;
     }
 
     /// <summary>

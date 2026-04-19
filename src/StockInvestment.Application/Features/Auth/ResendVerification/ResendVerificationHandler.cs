@@ -34,6 +34,7 @@ public class ResendVerificationHandler : IRequestHandler<ResendVerificationComma
 
         if (user == null)
         {
+            _logger.LogInformation("Resend verification: no account for requested email (no email sent).");
             // Don't reveal if user exists or not for security
             return new ResendVerificationDto
             {

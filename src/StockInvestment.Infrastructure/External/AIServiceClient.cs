@@ -16,11 +16,16 @@ namespace StockInvestment.Infrastructure.External;
 public partial class AIServiceClient : IAIService
 {
     private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<AIServiceClient> _logger;
 
-    public AIServiceClient(HttpClient httpClient, ILogger<AIServiceClient> logger)
+    public AIServiceClient(
+        HttpClient httpClient,
+        IHttpClientFactory httpClientFactory,
+        ILogger<AIServiceClient> logger)
     {
         _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -201,8 +206,6 @@ public partial class AIServiceClient : IAIService
         List<string>? KeyPoints,
         List<string>? Key_Points
     );
-    private record AnalyzeResponse(string Analysis);
-    private record AnalyzeEventDetailedResponse(string Analysis, string Impact);
     
     /// <summary>
     /// Response from AI service /api/qa endpoint with source objects
@@ -215,7 +218,6 @@ public partial class AIServiceClient : IAIService
         [JsonPropertyName("sources")]
         public List<SourceObject> Sources { get; set; } = new();
     }
-    private record ParseAlertApiResponse(string Ticker, string Condition, decimal Threshold, string Timeframe, string AlertType);
     private sealed class ForecastApiResponse
     {
         [JsonPropertyName("symbol")]

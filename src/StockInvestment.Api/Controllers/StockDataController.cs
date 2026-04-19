@@ -14,6 +14,7 @@ public class StockDataController : ControllerBase
 {
     private readonly IStockTickerRepository _stockTickerRepository;
     private readonly ICacheService _cacheService;
+    private readonly IVNStockService _vnStockService;
     private readonly ILogger<StockDataController> _logger;
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
     private readonly TimeSpan _quoteCacheDuration;
@@ -23,12 +24,14 @@ public class StockDataController : ControllerBase
     public StockDataController(
         IStockTickerRepository stockTickerRepository,
         ICacheService cacheService,
+        IVNStockService vnStockService,
         ILogger<StockDataController> logger,
         ICacheKeyGenerator cacheKeyGenerator,
         IConfiguration configuration)
     {
         _stockTickerRepository = stockTickerRepository;
         _cacheService = cacheService;
+        _vnStockService = vnStockService;
         _logger = logger;
         _cacheKeyGenerator = cacheKeyGenerator;
         _quoteCacheDuration = BuildDuration(configuration.GetValue("Features:QuoteCacheMinutes", 1), 1, 15);
@@ -56,14 +59,32 @@ public class StockDataController : ControllerBase
             var end = endDate ?? DateTime.Now;
             var cacheKey = _cacheKeyGenerator.GenerateOHLCVKey(symbol, start, end);
 
-            // Read-only request path: do not call VNStock from HTTP requests.
             var ohlcvData = await _cacheService.GetAsync<List<OHLCVResponseDto>>(cacheKey);
             if (ohlcvData == null || ohlcvData.Count == 0)
             {
-                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                var historicalData = (await _vnStockService.GetHistoricalDataAsync(symbol, start, end))
+                    .OrderBy(d => d.Date)
+                    .ToList();
+
+                if (historicalData.Count == 0)
                 {
-                    message = $"Historical data for {symbol} is warming up. Try again shortly."
-                });
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                    {
+                        message = $"Historical data for {symbol} is warming up. Try again shortly."
+                    });
+                }
+
+                ohlcvData = historicalData.Select(d => new OHLCVResponseDto
+                {
+                    Time = new DateTimeOffset(d.Date).ToUnixTimeSeconds(),
+                    Open = d.Open,
+                    High = d.High,
+                    Low = d.Low,
+                    Close = d.Close,
+                    Volume = d.Volume
+                }).ToList();
+
+                await _cacheService.SetAsync(cacheKey, ohlcvData, TimeSpan.FromMinutes(30));
             }
 
             var lastUpdated = DateTimeOffset

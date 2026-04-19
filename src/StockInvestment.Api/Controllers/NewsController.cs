@@ -64,7 +64,7 @@ public class NewsController : ControllerBase
         // Nếu có RabbitMQ, queue như cũ
         if (_rabbitMQService != null)
         {
-            _rabbitMQService.Publish("news_summarize", new { NewsId = id });
+            _rabbitMQService.Publish(RabbitMQService.NewsSummarizeQueue, new { NewsId = id });
             return Accepted(new { message = "Summarization request queued", newsId = id });
         }
         

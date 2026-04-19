@@ -338,6 +338,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPortfolioRepository, PortfolioRepository>();
         services.AddScoped<IStockTickerRepository, StockTickerRepository>();
         services.AddScoped<IEmailVerificationTokenRepository, EmailVerificationTokenRepository>();
+        services.AddScoped<IPasswordResetTokenRepository, PasswordResetTokenRepository>();
 
         return services;
     }
@@ -476,20 +477,35 @@ public static class ServiceCollectionExtensions
         .AddPolicyHandler((serviceProvider, request) =>
         {
             var policyService = serviceProvider.GetRequiredService<Infrastructure.Services.ResiliencePolicyService>();
-            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
-            var isInsightGenerate =
-                path.Contains("/api/insights/generate", StringComparison.OrdinalIgnoreCase);
-
-            if (isInsightGenerate)
-            {
-                return policyService.CreateCombinedPolicy(
-                    retryCount: 2,
-                    exceptionsAllowedBeforeBreaking: 5,
-                    durationOfBreak: TimeSpan.FromSeconds(30));
-            }
-
             return policyService.CreateCombinedPolicy(
                 retryCount: 3,
+                exceptionsAllowedBeforeBreaking: 5,
+                durationOfBreak: TimeSpan.FromSeconds(30));
+        });
+
+        // Dedicated HttpClient for /api/insights/generate: long timeout, no retry
+        // (insight calls are serialized by the upstream LLM rate limit; retrying
+        // would only amplify 429/502 and exceed the caller's budget).
+        services.AddHttpClient("AIInsightService", client =>
+        {
+            var aiServiceUrl = configuration["AIService:BaseUrl"] ?? configuration["AIService:Url"];
+            if (string.IsNullOrWhiteSpace(aiServiceUrl))
+            {
+                if (!isNonProduction)
+                {
+                    throw new InvalidOperationException("AIService:BaseUrl (or AIService:Url) must be configured.");
+                }
+                aiServiceUrl = "http://localhost:8000";
+            }
+            client.BaseAddress = new Uri(aiServiceUrl);
+            var insightTimeoutSec = configuration.GetValue("AIService:InsightTimeoutSeconds", 600);
+            client.Timeout = TimeSpan.FromSeconds(insightTimeoutSec);
+        })
+        .AddPolicyHandler((serviceProvider, request) =>
+        {
+            var policyService = serviceProvider.GetRequiredService<Infrastructure.Services.ResiliencePolicyService>();
+            return policyService.CreateCombinedPolicy(
+                retryCount: 0,
                 exceptionsAllowedBeforeBreaking: 5,
                 durationOfBreak: TimeSpan.FromSeconds(30));
         });
@@ -639,8 +655,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<NewsSummarizeHandler>(sp =>
             new NewsSummarizeHandler(
                 sp.GetRequiredService<RabbitMQService>().Channel,
-                sp.GetRequiredService<IAIService>(),
-                sp.GetRequiredService<INewsService>(),
+                sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetRequiredService<IConfiguration>(),
                 sp.GetRequiredService<ILogger<NewsSummarizeHandler>>()));
 
         services.AddHostedService<NewsSummarizeConsumerService>();

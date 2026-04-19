@@ -1,7 +1,9 @@
+using System.Text.RegularExpressions;
 using Serilog;
 using StockInvestment.Infrastructure.Data;
 using StockInvestment.Api.Extensions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
@@ -42,7 +44,7 @@ try
 
     Log.Information("Applying database migrations");
     await dbContext.Database.MigrateAsync();
-    await EnsureDefaultAdminUserAsync(migrationScope.ServiceProvider, dbContext);
+    await EnsureDefaultAdminUserAsync(migrationScope.ServiceProvider, dbContext, app.Configuration);
 
     // Configure pipeline using extension methods
     app.ConfigurePipeline()
@@ -63,19 +65,67 @@ finally
     Log.CloseAndFlush();
 }
 
-static async Task EnsureDefaultAdminUserAsync(IServiceProvider serviceProvider, ApplicationDbContext dbContext)
+static bool IsBootstrapPasswordStrongEnough(string password, out string failureDetail)
 {
-    const string adminEmailValue = "admin@gmail.com";
-    const string adminPassword = "Anhyeuem12313#";
+    failureDetail = "";
+    if (password.Length is < 8 or > 100)
+    {
+        failureDetail = "Password must be between 8 and 100 characters.";
+        return false;
+    }
 
+    if (!Regex.IsMatch(password, "[A-Z]")) { failureDetail = "Password must contain at least one uppercase letter."; return false; }
+    if (!Regex.IsMatch(password, "[a-z]")) { failureDetail = "Password must contain at least one lowercase letter."; return false; }
+    if (!Regex.IsMatch(password, "[0-9]")) { failureDetail = "Password must contain at least one digit."; return false; }
+    if (!Regex.IsMatch(password, "[^a-zA-Z0-9]")) { failureDetail = "Password must contain at least one special character."; return false; }
+    return true;
+}
+
+static async Task EnsureDefaultAdminUserAsync(
+    IServiceProvider serviceProvider,
+    ApplicationDbContext dbContext,
+    IConfiguration configuration)
+{
     var hasAdmin = await dbContext.Users.AnyAsync(u => u.Role == UserRole.Admin);
     if (hasAdmin)
     {
         return;
     }
 
+    var adminEmailValue = configuration["BootstrapAdmin:Email"]?.Trim();
+    if (string.IsNullOrEmpty(adminEmailValue))
+    {
+        adminEmailValue = "admin@example.com";
+    }
+
+    var adminPassword = configuration["BootstrapAdmin:Password"]?.Trim();
+    if (string.IsNullOrEmpty(adminPassword))
+    {
+        Log.Warning(
+            "No Admin user exists and BootstrapAdmin:Password is not set. Skipping default admin seed. " +
+            "Set user secrets (Development): dotnet user-secrets set \"BootstrapAdmin:Password\" \"<strong-password>\" " +
+            "and optionally \"BootstrapAdmin:Email\". Production: set env BootstrapAdmin__Password / BootstrapAdmin__Email.");
+        return;
+    }
+
+    if (!IsBootstrapPasswordStrongEnough(adminPassword, out var pwdReason))
+    {
+        Log.Warning("BootstrapAdmin:Password is invalid ({Reason}). Skipping default admin seed.", pwdReason);
+        return;
+    }
+
+    Email adminEmail;
+    try
+    {
+        adminEmail = Email.Create(adminEmailValue);
+    }
+    catch (ArgumentException ex)
+    {
+        Log.Warning(ex, "BootstrapAdmin:Email is invalid ({Email}). Skipping default admin seed.", adminEmailValue);
+        return;
+    }
+
     var passwordHasher = serviceProvider.GetRequiredService<IPasswordHasher>();
-    var adminEmail = Email.Create(adminEmailValue);
     var existingUser = await dbContext.Users.FirstOrDefaultAsync(u => u.Email == adminEmail);
 
     if (existingUser is null)

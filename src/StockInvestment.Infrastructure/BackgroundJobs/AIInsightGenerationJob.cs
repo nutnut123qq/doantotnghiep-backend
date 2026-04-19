@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -16,16 +17,19 @@ public class AIInsightGenerationJob : BackgroundService
 {
     private readonly ILogger<AIInsightGenerationJob> _logger;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IConfiguration _configuration;
     private readonly AIInsightGenerationOptions _options;
     private TimeSpan _generationInterval;
 
     public AIInsightGenerationJob(
         ILogger<AIInsightGenerationJob> logger,
         IServiceProvider serviceProvider,
+        IConfiguration configuration,
         IOptions<AIInsightGenerationOptions> options)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
+        _configuration = configuration;
         _options = options.Value;
         _generationInterval = TimeSpan.FromMinutes(Math.Max(15, _options.IntervalMinutes));
     }
@@ -73,6 +77,26 @@ public class AIInsightGenerationJob : BackgroundService
     private async Task GenerateInsightsAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceProvider.CreateScope();
+
+        // Prevent duplicate runs when multiple API instances share the same DB.
+        // Lock TTL deliberately exceeds the configured interval so expiry cannot race
+        // with a long-running generation cycle.
+        var lockExpiry = TimeSpan.FromMinutes(Math.Max(60, (int)_generationInterval.TotalMinutes * 2));
+        var distributedLock = await JobLockHelper.TryAcquireLockAsync(
+            scope,
+            _configuration,
+            _logger,
+            jobName: "ai-insight-generation",
+            lockExpiry: lockExpiry,
+            cancellationToken: cancellationToken);
+
+        if (distributedLock == null)
+        {
+            return;
+        }
+
+        using var lockHandle = distributedLock;
+
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var insightService = scope.ServiceProvider.GetRequiredService<IAIInsightService>();
 
@@ -141,8 +165,10 @@ public class AIInsightGenerationJob : BackgroundService
             .Select(t => t.Id)
             .ToListAsync(cancellationToken);
 
+        var topTickerSet = topTickers.ToHashSet();
+
         var activeInsightTickerIds = await dbContext.AIInsights
-            .Where(i => i.DismissedAt == null)
+            .Where(i => i.DismissedAt == null && !i.IsDeleted)
             .Select(i => i.TickerId)
             .Distinct()
             .ToListAsync(cancellationToken);
@@ -151,8 +177,29 @@ public class AIInsightGenerationJob : BackgroundService
         var missing = topTickers.Where(id => !activeSet.Contains(id)).ToList();
         var existing = topTickers.Where(id => activeSet.Contains(id)).ToList();
 
-        // Coverage-first priority: missing symbols are always evaluated first.
-        return missing.Concat(existing).ToList();
+        // Symbols that still have a live feed insight but fell OUT of the top-volume window
+        // (or have Volume=0 in DB) would otherwise never be scheduled again — their cards look
+        // "frozen" for days. Refresh them by oldest GeneratedAt first, same cap as coverage.
+        var staleOutsideTopVolume = await dbContext.AIInsights
+            .Where(i => i.DismissedAt == null && !i.IsDeleted)
+            .GroupBy(i => i.TickerId)
+            .Select(g => new { TickerId = g.Key, LatestGenerated = g.Max(x => x.GeneratedAt) })
+            .Where(x => !topTickerSet.Contains(x.TickerId))
+            .OrderBy(x => x.LatestGenerated)
+            .Take(targetCoverage)
+            .Select(x => x.TickerId)
+            .ToListAsync(cancellationToken);
+
+        if (staleOutsideTopVolume.Count > 0)
+        {
+            _logger.LogInformation(
+                "Insight scheduler: {StaleCount} active tickers are outside top-{TopN} by volume; will refresh oldest-first after coverage gaps.",
+                staleOutsideTopVolume.Count,
+                targetCoverage);
+        }
+
+        // Priority: fill coverage gaps → refresh stale off-top-volume insights → maintain top-volume names.
+        return missing.Concat(staleOutsideTopVolume).Concat(existing).ToList();
     }
 
     private async Task EnqueueTriggeredSymbolsAsync(

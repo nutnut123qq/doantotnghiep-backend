@@ -23,11 +23,6 @@ public interface IWorkspaceService
     Task AddWatchlistAsync(Guid workspaceId, Guid watchlistId, Guid userId, CancellationToken cancellationToken = default);
     Task RemoveWatchlistAsync(Guid workspaceId, Guid watchlistId, Guid userId, CancellationToken cancellationToken = default);
     
-    // Layouts
-    Task<IEnumerable<Layout>> GetSharedLayoutsAsync(Guid workspaceId, Guid userId, CancellationToken cancellationToken = default);
-    Task AddLayoutAsync(Guid workspaceId, Guid layoutId, Guid userId, CancellationToken cancellationToken = default);
-    Task RemoveLayoutAsync(Guid workspaceId, Guid layoutId, Guid userId, CancellationToken cancellationToken = default);
-    
     // Messages
     Task<IEnumerable<WorkspaceMessage>> GetMessagesAsync(Guid workspaceId, Guid userId, int limit = 50, CancellationToken cancellationToken = default);
     Task<WorkspaceMessage> SendMessageAsync(Guid workspaceId, string content, Guid userId, CancellationToken cancellationToken = default);

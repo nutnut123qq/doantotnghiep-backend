@@ -6,6 +6,8 @@ using StockInvestment.Application.Features.Auth.ChangePassword;
 using StockInvestment.Application.Features.Auth.Register;
 using StockInvestment.Application.Features.Auth.VerifyEmail;
 using StockInvestment.Application.Features.Auth.ResendVerification;
+using StockInvestment.Application.Features.Auth.ForgotPassword;
+using StockInvestment.Application.Features.Auth.ResetPassword;
 using StockInvestment.Api.Middleware;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Exceptions;
@@ -118,6 +120,34 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationCommand command)
     {
         var result = await _mediator.Send(command);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Request a password reset link. Always returns 200 to prevent user enumeration.
+    /// </summary>
+    [HttpPost("forgot-password")]
+    [ProducesResponseType(typeof(ForgotPasswordDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordCommand command)
+    {
+        var result = await _mediator.Send(command);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Reset password using a token sent to the user's email.
+    /// </summary>
+    [HttpPost("reset-password")]
+    [ProducesResponseType(typeof(ResetPasswordDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordCommand command)
+    {
+        var result = await _mediator.Send(command);
+        if (!result.Success)
+        {
+            return BadRequest(result);
+        }
         return Ok(result);
     }
 

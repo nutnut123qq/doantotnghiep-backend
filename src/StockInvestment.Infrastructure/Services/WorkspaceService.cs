@@ -217,52 +217,6 @@ public class WorkspaceService : IWorkspaceService
         }
     }
 
-    public async Task<IEnumerable<Layout>> GetSharedLayoutsAsync(Guid workspaceId, Guid userId, CancellationToken cancellationToken = default)
-    {
-        if (!await _unitOfWork.Workspaces.IsMemberAsync(workspaceId, userId, cancellationToken))
-        {
-            throw new UnauthorizedAccessException("User is not a member of this workspace");
-        }
-
-        var workspace = await _unitOfWork.Workspaces.GetByIdWithDetailsAsync(workspaceId, cancellationToken);
-        return workspace?.Layouts.Select(wl => wl.Layout) ?? Enumerable.Empty<Layout>();
-    }
-
-    public async Task AddLayoutAsync(Guid workspaceId, Guid layoutId, Guid userId, CancellationToken cancellationToken = default)
-    {
-        if (!await _unitOfWork.Workspaces.HasPermissionAsync(workspaceId, userId, cancellationToken))
-        {
-            throw new UnauthorizedAccessException("User does not have permission to add layouts");
-        }
-
-        var workspaceLayout = new WorkspaceLayout
-        {
-            WorkspaceId = workspaceId,
-            LayoutId = layoutId,
-            AddedByUserId = userId,
-        };
-
-        await _unitOfWork.Repository<WorkspaceLayout>().AddAsync(workspaceLayout, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task RemoveLayoutAsync(Guid workspaceId, Guid layoutId, Guid userId, CancellationToken cancellationToken = default)
-    {
-        if (!await _unitOfWork.Workspaces.HasPermissionAsync(workspaceId, userId, cancellationToken))
-        {
-            throw new UnauthorizedAccessException("User does not have permission to remove layouts");
-        }
-
-        var workspaceLayout = await _unitOfWork.Repository<WorkspaceLayout>()
-            .FirstOrDefaultAsync(wl => wl.WorkspaceId == workspaceId && wl.LayoutId == layoutId, cancellationToken);
-
-        if (workspaceLayout != null)
-        {
-            await _unitOfWork.Repository<WorkspaceLayout>().DeleteAsync(workspaceLayout);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-        }
-    }
-
     public async Task<IEnumerable<WorkspaceMessage>> GetMessagesAsync(Guid workspaceId, Guid userId, int limit = 50, CancellationToken cancellationToken = default)
     {
         if (!await _unitOfWork.Workspaces.IsMemberAsync(workspaceId, userId, cancellationToken))

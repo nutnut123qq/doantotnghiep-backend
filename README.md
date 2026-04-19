@@ -27,7 +27,16 @@ This project follows Clean Architecture principles with the following layers:
    dotnet restore
    ```
 3. Update `appsettings.json` with your database connection strings
-4. Run database migrations:
+4. **First-time admin user (no hard-coded password):** if the database has no user with role `Admin`, the API seeds one only when `BootstrapAdmin:Password` is set (same strength rules as registration: 8+ chars, upper, lower, digit, special). In Development, from `src/StockInvestment.Api`:
+
+   ```bash
+   dotnet user-secrets set "BootstrapAdmin:Email" "admin@gmail.com"
+   dotnet user-secrets set "BootstrapAdmin:Password" "YourStrongP@ssw0rd"
+   ```
+
+   Production: set environment variables `BootstrapAdmin__Email` and `BootstrapAdmin__Password`. If password is omitted and no admin exists, startup logs a warning and skips seeding.
+
+5. Run database migrations:
    ```bash
    # Apply all migrations (including AnalysisReports table)
    dotnet ef database update --project src/StockInvestment.Infrastructure --startup-project src/StockInvestment.Api
@@ -38,7 +47,7 @@ This project follows Clean Architecture principles with the following layers:
    ```
    
    **Note:** Ensure PostgreSQL is running and connection string in `appsettings.json` is correct before running migrations.
-5. Run the application:
+6. Run the application:
    ```bash
    dotnet run --project src/StockInvestment.Api
    ```

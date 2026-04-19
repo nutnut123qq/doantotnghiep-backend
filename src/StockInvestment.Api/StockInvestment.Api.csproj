@@ -4,6 +4,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>stockinvestment-api-8f3c2a1b-9d4e-4c7f-b2a6-1e0d5c9b7a8f</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

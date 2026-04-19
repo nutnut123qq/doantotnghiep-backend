@@ -77,4 +77,60 @@ public class LangGraphForecastMapperTests
         Assert.Equal("Hold", r.Recommendation);
         Assert.Equal("Medium", r.Confidence);
     }
+
+    [Fact]
+    public void Map_fills_key_drivers_from_debate_and_tech_when_news_evidence_empty()
+    {
+        var dto = new LangGraphAnalyzeResponse
+        {
+            Forecast = "UP",
+            Confidence = 60,
+            NewsEvidence = new List<LangGraphNewsEvidenceItem>(),
+            DebateSummary = new LangGraphDebateSummary
+            {
+                NewsAgent = "Dòng tiền vào mạnh.",
+                TechAgent = "Xu hướng tăng ngắn hạn.",
+                FinalDecision = "Ưu tiên quan sát breakout."
+            },
+            TechEvidence = new LangGraphTechEvidence
+            {
+                ChangePct = 2.5,
+                Rsi = 62.3,
+                LastClose = 100.5
+            }
+        };
+
+        var r = _mapper.Map(dto, "VIC", "short");
+
+        Assert.NotEmpty(r.KeyDrivers);
+        Assert.Contains(r.KeyDrivers, d => d.Contains("Quyết định tổng hợp", StringComparison.Ordinal));
+        Assert.Contains(r.KeyDrivers, d => d.Contains("Tóm tắt góc tin", StringComparison.Ordinal));
+        Assert.Contains(r.KeyDrivers, d => d.Contains("Tóm tắt góc kỹ thuật", StringComparison.Ordinal));
+        Assert.Contains(r.KeyDrivers, d => d.Contains("Chỉ báo kỹ thuật", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Map_uses_why_it_matters_when_title_and_snippet_missing()
+    {
+        var dto = new LangGraphAnalyzeResponse
+        {
+            Forecast = "SIDEWAYS",
+            Confidence = 50,
+            NewsEvidence = new List<LangGraphNewsEvidenceItem>
+            {
+                new()
+                {
+                    Title = "",
+                    Snippet = "",
+                    Sentiment = "positive",
+                    WhyItMatters = "Tác động tới biên lợi nhuận Q4."
+                }
+            }
+        };
+
+        var r = _mapper.Map(dto, "AAA", "short");
+
+        Assert.Single(r.KeyDrivers);
+        Assert.Contains("Tác động", r.KeyDrivers[0], StringComparison.Ordinal);
+    }
 }

@@ -36,16 +36,13 @@ public class RegisterHandler : IRequestHandler<RegisterCommand, RegisterDto>
     public async Task<RegisterDto> Handle(RegisterCommand request, CancellationToken cancellationToken)
     {
         var email = Email.Create(request.Email);
-
-        // Check if user already exists
         var existingUser = await _userRepository.GetByEmailAsync(email, cancellationToken);
 
         if (existingUser != null)
         {
-            throw new ConflictException("User", "email", email.Value);
+            return await HandleExistingUserAsync(existingUser, request.Password, cancellationToken);
         }
 
-        // Create new user with BCrypt hashed password
         var user = new User
         {
             Email = email,
@@ -58,29 +55,7 @@ public class RegisterHandler : IRequestHandler<RegisterCommand, RegisterDto>
         await _userRepository.AddAsync(user, cancellationToken);
         await _userRepository.SaveChangesAsync(cancellationToken);
 
-        // Generate verification token
-        var token = Guid.NewGuid().ToString("N");
-        var verificationToken = new EmailVerificationToken
-        {
-            UserId = user.Id,
-            Token = token,
-            ExpiresAt = DateTime.UtcNow.AddHours(24)
-        };
-
-        await _tokenRepository.AddAsync(verificationToken, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        // Send verification email
-        try
-        {
-            await _emailService.SendVerificationEmailAsync(email.Value, token, cancellationToken);
-            _logger.LogInformation("Verification email sent to {Email}", email.Value);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to send verification email to {Email}. User can resend later.", email.Value);
-            // Don't fail registration if email fails - user can resend
-        }
+        await CreateTokenAndSendAsync(user, cancellationToken);
 
         _logger.LogInformation(
             "User registered successfully: {Email} | UserId: {UserId}",
@@ -94,5 +69,63 @@ public class RegisterHandler : IRequestHandler<RegisterCommand, RegisterDto>
             Message = "Registration successful. Please check your email to verify your account."
         };
     }
-}
 
+    private async Task<RegisterDto> HandleExistingUserAsync(User existingUser, string password, CancellationToken cancellationToken)
+    {
+        if (existingUser.IsEmailVerified)
+        {
+            throw new ConflictException("User", "email", existingUser.Email.Value);
+        }
+
+        if (!_passwordHasher.VerifyPassword(password, existingUser.PasswordHash))
+        {
+            _logger.LogWarning(
+                "Register re-attempt with wrong password for unverified user {Email}",
+                existingUser.Email.Value);
+            throw new UnauthorizedException("Invalid email or password.");
+        }
+
+        existingUser.PasswordHash = _passwordHasher.HashPassword(password);
+        existingUser.UpdatedAt = DateTime.UtcNow;
+
+        await _tokenRepository.InvalidateUnusedTokensForUserAsync(existingUser.Id, cancellationToken);
+
+        await CreateTokenAndSendAsync(existingUser, cancellationToken);
+
+        _logger.LogInformation(
+            "Unverified user re-registered; verification email resent: {Email} | UserId: {UserId}",
+            existingUser.Email.Value,
+            existingUser.Id);
+
+        return new RegisterDto
+        {
+            UserId = existingUser.Id,
+            Email = existingUser.Email.Value,
+            Message = "Account pending verification updated. Please check your email to verify your account."
+        };
+    }
+
+    private async Task CreateTokenAndSendAsync(User user, CancellationToken cancellationToken)
+    {
+        var tokenValue = Guid.NewGuid().ToString("N");
+        var verificationToken = new EmailVerificationToken
+        {
+            UserId = user.Id,
+            Token = tokenValue,
+            ExpiresAt = DateTime.UtcNow.AddHours(24)
+        };
+
+        await _tokenRepository.AddAsync(verificationToken, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await _emailService.SendVerificationEmailAsync(user.Email.Value, tokenValue, cancellationToken);
+            _logger.LogInformation("Verification email sent to {Email}", user.Email.Value);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send verification email to {Email}. User can resend later.", user.Email.Value);
+        }
+    }
+}

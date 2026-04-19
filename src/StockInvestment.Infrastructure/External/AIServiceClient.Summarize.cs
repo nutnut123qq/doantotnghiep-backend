@@ -28,23 +28,4 @@ public partial class AIServiceClient
         };
     }
 
-    public async Task<string> AnalyzeEventAsync(string eventDescription, CancellationToken cancellationToken = default)
-    {
-        var response = await _httpClient.PostAsJsonAsync("/api/analyze-event", new { description = eventDescription }, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<AnalyzeResponse>(cancellationToken: cancellationToken);
-        return result?.Analysis ?? string.Empty;
-    }
-
-    public async Task<EventAnalysisResult> AnalyzeEventDetailedAsync(string eventDescription, CancellationToken cancellationToken = default)
-    {
-        var response = await _httpClient.PostAsJsonAsync("/api/analyze-event", new { description = eventDescription }, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<AnalyzeEventDetailedResponse>(cancellationToken: cancellationToken);
-        return new EventAnalysisResult
-        {
-            Analysis = result?.Analysis ?? string.Empty,
-            Impact = result?.Impact ?? string.Empty
-        };
-    }
 }

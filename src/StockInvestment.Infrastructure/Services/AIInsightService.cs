@@ -2,11 +2,13 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using StockInvestment.Application.DTOs.AIInsights;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Domain.Enums;
 using StockInvestment.Domain.Constants;
+using StockInvestment.Infrastructure.Configuration;
 
 namespace StockInvestment.Infrastructure.Services;
 
@@ -20,6 +22,7 @@ public class AIInsightService : IAIInsightService
     private readonly ITechnicalDataService _technicalDataService;
     private readonly INewsService _newsService;
     private readonly ILogger<AIInsightService> _logger;
+    private readonly AIInsightGenerationOptions _generationOptions;
 
     public AIInsightService(
         IUnitOfWork unitOfWork,
@@ -28,7 +31,8 @@ public class AIInsightService : IAIInsightService
         IAIService aiService,
         ITechnicalDataService technicalDataService,
         INewsService newsService,
-        ILogger<AIInsightService> logger)
+        ILogger<AIInsightService> logger,
+        IOptions<AIInsightGenerationOptions> generationOptions)
     {
         _unitOfWork = unitOfWork;
         _aiInsightRepository = aiInsightRepository;
@@ -37,6 +41,7 @@ public class AIInsightService : IAIInsightService
         _technicalDataService = technicalDataService;
         _newsService = newsService;
         _logger = logger;
+        _generationOptions = generationOptions.Value;
     }
 
     public async Task<IEnumerable<AIInsight>> GetInsightsAsync(
@@ -295,6 +300,18 @@ public class AIInsightService : IAIInsightService
             {
                 failedCount++;
                 _logger.LogWarning(ex, "Hybrid insight refresh failed for ticker {TickerId}. Reason={Reason}", tickerId, reason);
+            }
+
+            if (_generationOptions.InterTickerDelayMs > 0 && generatedCount < maxGeneratePerRun)
+            {
+                try
+                {
+                    await Task.Delay(_generationOptions.InterTickerDelayMs, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
         }
 

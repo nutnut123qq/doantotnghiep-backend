@@ -189,6 +189,9 @@ public class AIInsightService : IAIInsightService
             }
             else
             {
+                // Hide any previous visible insights for this ticker so only the newest one remains visible
+                await _aiInsightRepository.HidePreviousInsightsAsync(tickerId, cancellationToken: cancellationToken);
+
                 // Create new insight
                 var insight = new AIInsight
                 {
@@ -210,7 +213,7 @@ public class AIInsightService : IAIInsightService
                 // Reload with Ticker navigation property
                 var savedInsight = await _aiInsightRepository.GetInsightByIdWithTickerAsync(insight.Id, cancellationToken);
                 
-                _logger.LogInformation("Created AI insight {Id} for ticker {TickerId}", insight.Id, tickerId);
+                _logger.LogInformation("Created AI insight {Id} for ticker {TickerId}. Previous insights hidden.", insight.Id, tickerId);
                 return savedInsight ?? insight;
             }
         }

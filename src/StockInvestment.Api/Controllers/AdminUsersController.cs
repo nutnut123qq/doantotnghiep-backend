@@ -81,8 +81,8 @@ public class AdminUsersController : ControllerBase
     [HttpPut("{userId:guid}/status")]
     public async Task<ActionResult> SetUserActiveStatus(Guid userId, [FromBody] SetUserStatusRequest request)
     {
-        var success = await _mediator.Send(new SetUserActiveStatusCommand { UserId = userId, IsActive = request.IsActive });
-        if (!success) return NotFound($"User with ID {userId} not found");
+        var success = await _mediator.Send(new SetUserActiveStatusCommand { AdminUserId = GetRequiredAdminUserId(), UserId = userId, IsActive = request.IsActive });
+        if (!success) return BadRequest("Failed to update user status");
         var action = request.IsActive ? "activated" : "deactivated";
         return Ok(new { message = $"User {action} successfully" });
     }

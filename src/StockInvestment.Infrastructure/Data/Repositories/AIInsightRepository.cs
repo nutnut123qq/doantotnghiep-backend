@@ -137,4 +137,28 @@ public class AIInsightRepository : Repository<AIInsight>, IAIInsightRepository
             .ThenByDescending(i => i.Confidence)
             .ToListAsync(cancellationToken);
     }
+
+    public async Task HidePreviousInsightsAsync(
+        Guid tickerId,
+        Guid? excludeInsightId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbSet.Where(i =>
+            i.TickerId == tickerId &&
+            !i.IsDeleted &&
+            i.DismissedAt == null);
+
+        if (excludeInsightId.HasValue)
+        {
+            query = query.Where(i => i.Id != excludeInsightId.Value);
+        }
+
+        var previousInsights = await query.ToListAsync(cancellationToken);
+        foreach (var insight in previousInsights)
+        {
+            insight.IsDeleted = true;
+            insight.DismissedAt ??= DateTime.UtcNow;
+            insight.UpdatedAt = DateTime.UtcNow;
+        }
+    }
 }

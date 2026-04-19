@@ -27,7 +27,7 @@ public interface IAdminService
     /// <summary>
     /// Activate/deactivate user account
     /// </summary>
-    Task<bool> SetUserActiveStatusAsync(Guid userId, bool isActive);
+    Task<bool> SetUserActiveStatusAsync(Guid adminUserId, Guid userId, bool isActive);
     
     /// <summary>
     /// Delete user account

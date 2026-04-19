@@ -13,6 +13,7 @@ using StockInvestment.Infrastructure.Configuration;
 using StockInvestment.Api.Configuration;
 using StockInvestment.Application.Configuration;
 using StackExchange.Redis;
+using System.Security.Claims;
 using System.Text;
 using MediatR;
 using System.Reflection;
@@ -247,6 +248,27 @@ public static class ServiceCollectionExtensions
                 ValidAudience = jwtAudience,
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero
+            };
+            options.Events = new JwtBearerEvents
+            {
+                OnTokenValidated = async context =>
+                {
+                    var userIdClaim = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                    if (!Guid.TryParse(userIdClaim, out var userId))
+                    {
+                        context.Fail("Invalid user context");
+                        return;
+                    }
+
+                    var uow = context.HttpContext.RequestServices
+                        .GetRequiredService<IUnitOfWork>();
+                    var user = await uow.Users.GetByIdAsync(userId);
+                    if (user == null || !user.IsActive)
+                    {
+                        context.Fail("You have been banned");
+                        return;
+                    }
+                }
             };
         });
 

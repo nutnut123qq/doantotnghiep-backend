@@ -14,6 +14,11 @@ public class SetUserActiveStatusCommandHandler : IRequestHandler<SetUserActiveSt
 
     public async Task<bool> Handle(SetUserActiveStatusCommand request, CancellationToken cancellationToken)
     {
-        return await _adminService.SetUserActiveStatusAsync(request.UserId, request.IsActive);
+        if (request.AdminUserId == request.UserId && !request.IsActive)
+        {
+            return false;
+        }
+
+        return await _adminService.SetUserActiveStatusAsync(request.AdminUserId, request.UserId, request.IsActive);
     }
 }

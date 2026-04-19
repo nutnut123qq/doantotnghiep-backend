@@ -7,6 +7,7 @@ namespace StockInvestment.Application.Features.Admin.SetUserActiveStatus;
 /// </summary>
 public class SetUserActiveStatusCommand : IRequest<bool>
 {
+    public Guid AdminUserId { get; set; }
     public Guid UserId { get; set; }
     public bool IsActive { get; set; }
 }

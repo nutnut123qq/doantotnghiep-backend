@@ -61,19 +61,32 @@ public class AdminService : IAdminService
         return true;
     }
 
-    public async Task<bool> SetUserActiveStatusAsync(Guid userId, bool isActive)
+    public async Task<bool> SetUserActiveStatusAsync(Guid adminUserId, Guid userId, bool isActive)
     {
-        var user = await _unitOfWork.Users.GetByIdAsync(userId);
-        if (user == null)
-            return false;
+        var payload = new { userId, isActive };
+        try
+        {
+            var user = await _unitOfWork.Users.GetByIdAsync(userId);
+            if (user == null)
+            {
+                await LogAdminActionAsync(adminUserId, userId, "SetUserActiveStatus", payload, false, "User not found");
+                return false;
+            }
 
-        user.IsActive = isActive;
-        user.UpdatedAt = DateTime.UtcNow;
-        
-        await _unitOfWork.Repository<User>().UpdateAsync(user);
-        await _unitOfWork.SaveChangesAsync();
-        
-        return true;
+            user.IsActive = isActive;
+            user.UpdatedAt = DateTime.UtcNow;
+
+            await _unitOfWork.Repository<User>().UpdateAsync(user);
+            await _unitOfWork.SaveChangesAsync();
+
+            await LogAdminActionAsync(adminUserId, userId, "SetUserActiveStatus", payload, true, null);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            await LogAdminActionAsync(adminUserId, userId, "SetUserActiveStatus", payload, false, ex.Message);
+            return false;
+        }
     }
 
     public async Task<bool> DeleteUserAsync(Guid userId)

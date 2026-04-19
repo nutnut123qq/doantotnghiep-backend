@@ -65,8 +65,8 @@ public class LoginHandler : IRequestHandler<LoginCommand, LoginDto>
 
         if (!user.IsActive)
         {
-            _logger.LogWarning("Login attempt failed: Account deactivated for email {Email}", email.Value);
-            throw new UnauthorizedException("Account is deactivated");
+            _logger.LogWarning("Login attempt failed: User banned for email {Email}", email.Value);
+            throw new UnauthorizedException("You have been banned");
         }
 
         // Skip email verification check in Development mode for easier testing

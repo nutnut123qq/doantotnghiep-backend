@@ -54,4 +54,12 @@ public interface IAIInsightRepository : IRepository<AIInsight>
         string? symbol = null,
         bool includeDeleted = false,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Hide all previous active insights for a ticker (soft-delete) so only the newest one remains visible.
+    /// </summary>
+    Task HidePreviousInsightsAsync(
+        Guid tickerId,
+        Guid? excludeInsightId = null,
+        CancellationToken cancellationToken = default);
 }

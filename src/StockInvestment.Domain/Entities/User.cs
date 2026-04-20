@@ -20,7 +20,6 @@ public class User
     // Navigation properties
     public ICollection<Watchlist> Watchlists { get; set; } = new List<Watchlist>();
     public ICollection<Alert> Alerts { get; set; } = new List<Alert>();
-    public ICollection<Layout> Layouts { get; set; } = new List<Layout>();
     public ICollection<AIInsight> DismissedAIInsights { get; set; } = new List<AIInsight>();
 
     public User()

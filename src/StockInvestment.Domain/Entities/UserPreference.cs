@@ -12,7 +12,7 @@ public class UserPreference
     public User User { get; set; } = null!;
     
     /// <summary>
-    /// Preference key (e.g., "dashboard_layout", "theme", "notifications")
+    /// Preference key (e.g., "price_alerts_enabled", "theme", "notifications")
     /// </summary>
     public string PreferenceKey { get; set; } = string.Empty;
     

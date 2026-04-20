@@ -16,7 +16,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<Alert> Alerts { get; set; } = null!;
     public DbSet<News> News { get; set; } = null!;
     public DbSet<FinancialReport> FinancialReports { get; set; } = null!;
-    public DbSet<Layout> Layouts { get; set; } = null!;
     public DbSet<TechnicalIndicator> TechnicalIndicators { get; set; } = null!;
     public DbSet<UserPreference> UserPreferences { get; set; } = null!;
     public DbSet<CorporateEvent> CorporateEvents { get; set; } = null!;
@@ -31,7 +30,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<EmailVerificationToken> EmailVerificationTokens { get; set; } = null!;
     public DbSet<PasswordResetToken> PasswordResetTokens { get; set; } = null!;
     public DbSet<ChartSettings> ChartSettings { get; set; } = null!;
-    public DbSet<SharedLayout> SharedLayouts { get; set; } = null!;
     public DbSet<NotificationChannelConfig> NotificationChannelConfigs { get; set; } = null!;
     public DbSet<AnalysisReport> AnalysisReports { get; set; } = null!;
     public DbSet<AdminAuditLog> AdminAuditLogs { get; set; } = null!;
@@ -109,7 +107,6 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<FinancialReport>().ToTable("FinancialReports");
         modelBuilder.Entity<FinancialReport>()
             .HasIndex(fr => fr.IsDeleted);
-        modelBuilder.Entity<Layout>().ToTable("Layouts");
         modelBuilder.Entity<TechnicalIndicator>().ToTable("TechnicalIndicators");
         modelBuilder.Entity<UserPreference>().ToTable("UserPreferences");
         modelBuilder.Entity<DataSource>().ToTable("DataSources");
@@ -152,30 +149,6 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<ChartSettings>()
             .HasIndex(cs => new { cs.UserId, cs.Symbol })
             .IsUnique();
-
-        // Configure SharedLayout
-        modelBuilder.Entity<SharedLayout>()
-            .Property(sl => sl.LayoutJson)
-            .HasColumnType("text");
-
-        modelBuilder.Entity<SharedLayout>()
-            .HasIndex(sl => sl.Code)
-            .IsUnique();
-
-        modelBuilder.Entity<SharedLayout>()
-            .HasIndex(sl => sl.OwnerId);
-
-        modelBuilder.Entity<SharedLayout>()
-            .HasIndex(sl => sl.ExpiresAt);
-
-        modelBuilder.Entity<SharedLayout>()
-            .HasOne(sl => sl.Owner)
-            .WithMany()
-            .HasForeignKey(sl => sl.OwnerId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        // Configure table names
-        modelBuilder.Entity<SharedLayout>().ToTable("SharedLayouts");
 
         // Configure CorporateEvent inheritance (TPH - Table Per Hierarchy)
         modelBuilder.Entity<CorporateEvent>()

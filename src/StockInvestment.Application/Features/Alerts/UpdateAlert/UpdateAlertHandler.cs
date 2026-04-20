@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Enums;
 using StockInvestment.Domain.Exceptions;
 using StockInvestment.Domain.Entities;
 using StockTicker = StockInvestment.Domain.Entities.StockTicker;
@@ -51,6 +52,10 @@ public class UpdateAlertHandler : IRequestHandler<UpdateAlertCommand, UpdateAler
 
         if (request.Type.HasValue)
         {
+            if (!Enum.IsDefined(typeof(AlertType), request.Type.Value))
+            {
+                throw new ArgumentException($"Alert type '{request.Type.Value}' is not supported. Only Price and Volume alerts are available.", nameof(request.Type));
+            }
             alert.Type = request.Type.Value;
         }
 

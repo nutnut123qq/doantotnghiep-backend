@@ -103,12 +103,17 @@ public class AlertMonitorJob : BackgroundService
                 bool shouldTrigger = false;
                 decimal currentValue = 0;  // Runtime snapshot
 
-                // DB/legacy rows may have Type = 0; treat as Price so alerts still evaluate.
-                var alertType = Enum.IsDefined(typeof(AlertType), alert.Type)
-                    ? alert.Type
-                    : AlertType.Price;
+                if (!Enum.IsDefined(typeof(AlertType), alert.Type))
+                {
+                    _logger.LogWarning(
+                        "Alert {AlertId} for {Symbol} skipped: unsupported type {AlertType}. Only Price and Volume alerts are supported.",
+                        alert.Id,
+                        alert.Ticker.Symbol,
+                        alert.Type);
+                    continue;
+                }
 
-                switch (alertType)
+                switch (alert.Type)
                 {
                     case AlertType.Price:
                         currentValue = alert.Ticker.CurrentPrice;  // Snapshot TRƯỚC khi check
@@ -135,7 +140,6 @@ public class AlertMonitorJob : BackgroundService
                         currentValue = alert.Ticker.Volume ?? 0;
                         shouldTrigger = CheckVolumeAlert(alert);
                         break;
-                    // Add more alert types as needed
                 }
 
                 if (shouldTrigger)

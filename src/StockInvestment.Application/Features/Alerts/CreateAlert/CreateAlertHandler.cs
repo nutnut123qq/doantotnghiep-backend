@@ -29,11 +29,17 @@ public class CreateAlertHandler : IRequestHandler<CreateAlertCommand, CreateAler
             tickerId = ticker?.Id;
         }
 
+        var alertType = request.Type ?? AlertType.Price;
+        if (!Enum.IsDefined(typeof(AlertType), alertType))
+        {
+            throw new ArgumentException($"Alert type '{alertType}' is not supported. Only Price and Volume alerts are available.", nameof(request.Type));
+        }
+
         var alert = new Alert
         {
             UserId = request.UserId,
             TickerId = tickerId,
-            Type = request.Type ?? AlertType.Price,
+            Type = alertType,
             Condition = request.Condition ?? "{}",
             Threshold = request.Threshold,
             Timeframe = request.Timeframe,

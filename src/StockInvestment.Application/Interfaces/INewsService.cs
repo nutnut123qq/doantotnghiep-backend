@@ -6,7 +6,7 @@ namespace StockInvestment.Application.Interfaces;
 
 public interface INewsService
 {
-    Task<IEnumerable<News>> GetNewsAsync(int page = 1, int pageSize = 20, Guid? tickerId = null);
+    Task<(IReadOnlyList<News> Items, int TotalCount)> GetNewsAsync(int page = 1, int pageSize = 20, Guid? tickerId = null);
     /// <summary>All news including soft-deleted (admin list).</summary>
     Task<(IReadOnlyList<News> Items, int TotalCount)> GetNewsForAdminAsync(int page = 1, int pageSize = 20, Guid? tickerId = null);
     Task<News?> GetNewsByIdAsync(Guid id);

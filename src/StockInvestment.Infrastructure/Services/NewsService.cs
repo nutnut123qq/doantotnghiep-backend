@@ -27,7 +27,7 @@ public class NewsService : INewsService
         _aiService = aiService;
     }
 
-    public async Task<IEnumerable<News>> GetNewsAsync(int page = 1, int pageSize = 20, Guid? tickerId = null)
+    public async Task<(IReadOnlyList<News> Items, int TotalCount)> GetNewsAsync(int page = 1, int pageSize = 20, Guid? tickerId = null)
     {
         var query = _context.News.Where(n => !n.IsDeleted);
 
@@ -36,13 +36,16 @@ public class NewsService : INewsService
             query = query.Where(n => n.TickerId == tickerId.Value);
         }
 
-        var news = await query
+        var safePage = Math.Max(page, 1);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+        var totalCount = await query.CountAsync();
+        var items = await query
             .OrderByDescending(n => n.PublishedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
             .ToListAsync();
 
-        return news;
+        return (items, totalCount);
     }
 
     public async Task<(IReadOnlyList<News> Items, int TotalCount)> GetNewsForAdminAsync(int page = 1, int pageSize = 20, Guid? tickerId = null)

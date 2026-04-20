@@ -34,9 +34,16 @@ public class NewsController : ControllerBase
         [FromQuery] int pageSize = 20,
         [FromQuery] Guid? tickerId = null)
     {
-        var news = await _newsService.GetNewsAsync(page, pageSize, tickerId);
-        // Return empty list instead of null if no news found
-        return Ok(news ?? Enumerable.Empty<object>());
+        var safePage = Math.Max(page, 1);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+        var result = await _newsService.GetNewsAsync(safePage, safePageSize, tickerId);
+        return Ok(new PagedResponse<object>
+        {
+            Items = result.Items.Cast<object>().ToList(),
+            TotalCount = result.TotalCount,
+            PageNumber = safePage,
+            PageSize = safePageSize
+        });
     }
 
     [HttpGet("{id}")]

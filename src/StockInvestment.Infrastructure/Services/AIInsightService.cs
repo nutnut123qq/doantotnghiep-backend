@@ -89,7 +89,7 @@ public class AIInsightService : IAIInsightService
             // Collect news sentiment if not provided
             if (sentimentData == null)
             {
-                var recentNews = await _newsService.GetNewsAsync(1, 10, tickerId);
+                var (recentNews, _) = await _newsService.GetNewsAsync(1, 10, tickerId);
                 var newsList = recentNews.ToList();
                 
                 sentimentData = new Dictionary<string, string>();

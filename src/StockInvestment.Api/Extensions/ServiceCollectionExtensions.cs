@@ -353,7 +353,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICorporateEventRepository, CorporateEventRepository>();
         services.AddScoped<IDataSourceRepository, DataSourceRepository>();
         services.AddScoped<IChartSettingsRepository, ChartSettingsRepository>();
-        services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
         services.AddScoped<IAIModelConfigRepository, AIModelConfigRepository>();
         services.AddScoped<IAIInsightRepository, AIInsightRepository>();
@@ -396,7 +395,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAIInsightService, AIInsightService>();
         services.AddScoped<IPortfolioService, PortfolioService>();
         services.AddScoped<IEmailService, EmailService>();
-        services.AddScoped<IWorkspaceService, WorkspaceService>();
         services.AddScoped<INotificationChannelService, NotificationChannelService>();
         
         // Analysis Reports Q&A service (V1 Minimal - NO RAG)

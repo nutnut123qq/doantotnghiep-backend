@@ -41,11 +41,6 @@ public interface IUnitOfWork : IDisposable
     IChartSettingsRepository ChartSettings { get; }
 
     /// <summary>
-    /// Workspace repository
-    /// </summary>
-    IWorkspaceRepository Workspaces { get; }
-
-    /// <summary>
     /// Generic repository for any entity type
     /// </summary>
     IRepository<T> Repository<T>() where T : class;

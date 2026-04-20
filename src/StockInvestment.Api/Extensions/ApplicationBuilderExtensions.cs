@@ -109,7 +109,6 @@ public static class ApplicationBuilderExtensions
         // StockPriceHub is removed as it's redundant (TradingHub provides same functionality)
         app.MapHub<TradingHub>("/hubs/stock-price");
         app.MapHub<TradingHub>("/hubs/trading");
-        app.MapHub<WorkspaceHub>("/hubs/workspace");
 
         return app;
     }

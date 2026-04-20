@@ -19,7 +19,6 @@ public class UnitOfWork : IUnitOfWork
     private ICorporateEventRepository? _corporateEventRepository;
     private IDataSourceRepository? _dataSourceRepository;
     private IChartSettingsRepository? _chartSettingsRepository;
-    private IWorkspaceRepository? _workspaceRepository;
 
     public UnitOfWork(ApplicationDbContext context)
     {
@@ -87,15 +86,6 @@ public class UnitOfWork : IUnitOfWork
         {
             _chartSettingsRepository ??= new ChartSettingsRepository(_context);
             return _chartSettingsRepository;
-        }
-    }
-
-    public IWorkspaceRepository Workspaces
-    {
-        get
-        {
-            _workspaceRepository ??= new WorkspaceRepository(_context);
-            return _workspaceRepository;
         }
     }
 

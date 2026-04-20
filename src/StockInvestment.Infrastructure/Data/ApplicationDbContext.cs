@@ -31,11 +31,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<EmailVerificationToken> EmailVerificationTokens { get; set; } = null!;
     public DbSet<PasswordResetToken> PasswordResetTokens { get; set; } = null!;
     public DbSet<ChartSettings> ChartSettings { get; set; } = null!;
-    public DbSet<Workspace> Workspaces { get; set; } = null!;
-    public DbSet<WorkspaceMember> WorkspaceMembers { get; set; } = null!;
-    public DbSet<WorkspaceMessage> WorkspaceMessages { get; set; } = null!;
-    public DbSet<WorkspaceWatchlist> WorkspaceWatchlists { get; set; } = null!;
-    public DbSet<WorkspaceLayout> WorkspaceLayouts { get; set; } = null!;
     public DbSet<SharedLayout> SharedLayouts { get; set; } = null!;
     public DbSet<NotificationChannelConfig> NotificationChannelConfigs { get; set; } = null!;
     public DbSet<AnalysisReport> AnalysisReports { get; set; } = null!;
@@ -158,80 +153,6 @@ public class ApplicationDbContext : DbContext
             .HasIndex(cs => new { cs.UserId, cs.Symbol })
             .IsUnique();
 
-        // Configure Workspace relationships
-        modelBuilder.Entity<Workspace>()
-            .HasOne(w => w.Owner)
-            .WithMany()
-            .HasForeignKey(w => w.OwnerId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        modelBuilder.Entity<WorkspaceMember>()
-            .HasOne(wm => wm.Workspace)
-            .WithMany(w => w.Members)
-            .HasForeignKey(wm => wm.WorkspaceId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<WorkspaceMember>()
-            .HasOne(wm => wm.User)
-            .WithMany()
-            .HasForeignKey(wm => wm.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<WorkspaceMessage>()
-            .HasOne(wm => wm.Workspace)
-            .WithMany(w => w.Messages)
-            .HasForeignKey(wm => wm.WorkspaceId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<WorkspaceMessage>()
-            .HasOne(wm => wm.User)
-            .WithMany()
-            .HasForeignKey(wm => wm.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<WorkspaceWatchlist>()
-            .HasOne(ww => ww.Workspace)
-            .WithMany(w => w.Watchlists)
-            .HasForeignKey(ww => ww.WorkspaceId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<WorkspaceWatchlist>()
-            .HasOne(ww => ww.Watchlist)
-            .WithMany()
-            .HasForeignKey(ww => ww.WatchlistId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<WorkspaceLayout>()
-            .HasOne(wl => wl.Workspace)
-            .WithMany(w => w.Layouts)
-            .HasForeignKey(wl => wl.WorkspaceId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<WorkspaceLayout>()
-            .HasOne(wl => wl.Layout)
-            .WithMany()
-            .HasForeignKey(wl => wl.LayoutId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        // Configure Workspace indexes
-        modelBuilder.Entity<Workspace>()
-            .HasIndex(w => w.OwnerId);
-
-        modelBuilder.Entity<WorkspaceMember>()
-            .HasIndex(wm => new { wm.WorkspaceId, wm.UserId })
-            .IsUnique();
-
-        modelBuilder.Entity<WorkspaceMessage>()
-            .HasIndex(wm => wm.WorkspaceId);
-
-        modelBuilder.Entity<WorkspaceWatchlist>()
-            .HasIndex(ww => new { ww.WorkspaceId, ww.WatchlistId })
-            .IsUnique();
-
-        modelBuilder.Entity<WorkspaceLayout>()
-            .HasIndex(wl => new { wl.WorkspaceId, wl.LayoutId })
-            .IsUnique();
-
         // Configure SharedLayout
         modelBuilder.Entity<SharedLayout>()
             .Property(sl => sl.LayoutJson)
@@ -254,11 +175,6 @@ public class ApplicationDbContext : DbContext
             .OnDelete(DeleteBehavior.Cascade);
 
         // Configure table names
-        modelBuilder.Entity<Workspace>().ToTable("Workspaces");
-        modelBuilder.Entity<WorkspaceMember>().ToTable("WorkspaceMembers");
-        modelBuilder.Entity<WorkspaceMessage>().ToTable("WorkspaceMessages");
-        modelBuilder.Entity<WorkspaceWatchlist>().ToTable("WorkspaceWatchlists");
-        modelBuilder.Entity<WorkspaceLayout>().ToTable("WorkspaceLayouts");
         modelBuilder.Entity<SharedLayout>().ToTable("SharedLayouts");
 
         // Configure CorporateEvent inheritance (TPH - Table Per Hierarchy)

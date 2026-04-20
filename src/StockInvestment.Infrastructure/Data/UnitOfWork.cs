@@ -17,7 +17,6 @@ public class UnitOfWork : IUnitOfWork
     private IAlertRepository? _alertRepository;
     private IUserPreferenceRepository? _userPreferenceRepository;
     private ICorporateEventRepository? _corporateEventRepository;
-    private IDataSourceRepository? _dataSourceRepository;
     private IChartSettingsRepository? _chartSettingsRepository;
 
     public UnitOfWork(ApplicationDbContext context)
@@ -68,15 +67,6 @@ public class UnitOfWork : IUnitOfWork
         {
             _corporateEventRepository ??= new CorporateEventRepository(_context);
             return _corporateEventRepository;
-        }
-    }
-
-    public IDataSourceRepository DataSources
-    {
-        get
-        {
-            _dataSourceRepository ??= new DataSourceRepository(_context);
-            return _dataSourceRepository;
         }
     }
 

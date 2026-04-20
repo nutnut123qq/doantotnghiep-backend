@@ -1,5 +1,5 @@
 using System.Net.Http.Json;
-using StockInvestment.Application.DTOs.AnalysisReports;
+using StockInvestment.Application.DTOs.Common;
 using StockInvestment.Application.Interfaces;
 
 namespace StockInvestment.Infrastructure.External;

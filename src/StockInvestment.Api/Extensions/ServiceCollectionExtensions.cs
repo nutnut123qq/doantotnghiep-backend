@@ -351,10 +351,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAlertRepository, AlertRepository>();
         services.AddScoped<IUserPreferenceRepository, UserPreferenceRepository>();
         services.AddScoped<ICorporateEventRepository, CorporateEventRepository>();
-        services.AddScoped<IDataSourceRepository, DataSourceRepository>();
         services.AddScoped<IChartSettingsRepository, ChartSettingsRepository>();
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
-        services.AddScoped<IAIModelConfigRepository, AIModelConfigRepository>();
         services.AddScoped<IAIInsightRepository, AIInsightRepository>();
         services.AddScoped<IPortfolioRepository, PortfolioRepository>();
         services.AddScoped<IStockTickerRepository, StockTickerRepository>();
@@ -388,18 +386,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAdminService, AdminService>();
         services.AddScoped<ISystemHealthService, SystemHealthService>();
         services.AddScoped<IAnalyticsService, AnalyticsService>();
-        services.AddScoped<IDataSourceService, DataSourceService>();
-        services.AddScoped<IAIModelConfigService, AIModelConfigService>();
         services.AddScoped<INotificationTemplateService, NotificationTemplateService>();
         services.AddScoped<IPushNotificationService, PushNotificationService>();
         services.AddScoped<IAIInsightService, AIInsightService>();
         services.AddScoped<IPortfolioService, PortfolioService>();
         services.AddScoped<IEmailService, EmailService>();
         services.AddScoped<INotificationChannelService, NotificationChannelService>();
-        
-        // Analysis Reports Q&A service (V1 Minimal - NO RAG)
-        services.AddScoped<IAnalysisReportQAService, AnalysisReportQAService>();
-        services.AddScoped<IAnalysisReportService, AnalysisReportService>(); // P2-1: Add AnalysisReportService
 
         return services;
     }
@@ -622,17 +614,6 @@ public static class ServiceCollectionExtensions
         {
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-        });
-
-        // P0-2 SSRF: Dedicated HttpClient for DataSource TestConnection with auto-redirect DISABLED
-        // Redirects will be manually followed with validation at each step
-        services.AddHttpClient("DataSourceTestConnection", client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(10);
-        })
-        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-        {
-            AllowAutoRedirect = false // P0-2: Disable auto-redirect to validate each redirect URL
         });
 
         // Register notification channel senders

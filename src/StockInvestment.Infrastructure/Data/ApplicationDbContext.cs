@@ -20,9 +20,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<UserPreference> UserPreferences { get; set; } = null!;
     public DbSet<CorporateEvent> CorporateEvents { get; set; } = null!;
     public DbSet<AnalyticsEvent> AnalyticsEvents { get; set; } = null!;
-    public DbSet<DataSource> DataSources { get; set; } = null!;
-    public DbSet<AIModelConfig> AIModelConfigs { get; set; } = null!;
-    public DbSet<AIModelPerformance> AIModelPerformances { get; set; } = null!;
     public DbSet<NotificationTemplate> NotificationTemplates { get; set; } = null!;
     public DbSet<PushNotificationConfig> PushNotificationConfigs { get; set; } = null!;
     public DbSet<AIInsight> AIInsights { get; set; } = null!;
@@ -31,7 +28,6 @@ public class ApplicationDbContext : DbContext
     public DbSet<PasswordResetToken> PasswordResetTokens { get; set; } = null!;
     public DbSet<ChartSettings> ChartSettings { get; set; } = null!;
     public DbSet<NotificationChannelConfig> NotificationChannelConfigs { get; set; } = null!;
-    public DbSet<AnalysisReport> AnalysisReports { get; set; } = null!;
     public DbSet<AdminAuditLog> AdminAuditLogs { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -109,9 +105,6 @@ public class ApplicationDbContext : DbContext
             .HasIndex(fr => fr.IsDeleted);
         modelBuilder.Entity<TechnicalIndicator>().ToTable("TechnicalIndicators");
         modelBuilder.Entity<UserPreference>().ToTable("UserPreferences");
-        modelBuilder.Entity<DataSource>().ToTable("DataSources");
-        modelBuilder.Entity<AIModelConfig>().ToTable("AIModelConfigs");
-        modelBuilder.Entity<AIModelPerformance>().ToTable("AIModelPerformances");
         modelBuilder.Entity<NotificationTemplate>().ToTable("NotificationTemplates");
         modelBuilder.Entity<PushNotificationConfig>().ToTable("PushNotificationConfigs");
         modelBuilder.Entity<AIInsight>().ToTable("AIInsights");
@@ -259,28 +252,6 @@ public class ApplicationDbContext : DbContext
             .HasColumnName("xmin")
             .ValueGeneratedOnAddOrUpdate()
             .IsConcurrencyToken();
-
-        // Configure AnalysisReport table and indexes
-        modelBuilder.Entity<AnalysisReport>()
-            .ToTable("AnalysisReports");
-
-        // Content column as TEXT (unlimited length)
-        modelBuilder.Entity<AnalysisReport>()
-            .Property(ar => ar.Content)
-            .HasColumnType("text");
-
-        // Index on Symbol for filtering
-        modelBuilder.Entity<AnalysisReport>()
-            .HasIndex(ar => ar.Symbol);
-
-        // Index on PublishedAt for sorting
-        modelBuilder.Entity<AnalysisReport>()
-            .HasIndex(ar => ar.PublishedAt);
-
-        // Composite index on Symbol + PublishedAt (descending) for list queries
-        modelBuilder.Entity<AnalysisReport>()
-            .HasIndex(ar => new { ar.Symbol, ar.PublishedAt })
-            .IsDescending(false, true); // Symbol ascending, PublishedAt descending
 
         // Configure AdminAuditLog
         modelBuilder.Entity<AdminAuditLog>()

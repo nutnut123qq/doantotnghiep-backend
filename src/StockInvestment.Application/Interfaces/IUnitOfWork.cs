@@ -31,11 +31,6 @@ public interface IUnitOfWork : IDisposable
     ICorporateEventRepository CorporateEvents { get; }
 
     /// <summary>
-    /// Data Source repository
-    /// </summary>
-    IDataSourceRepository DataSources { get; }
-
-    /// <summary>
     /// Chart Settings repository
     /// </summary>
     IChartSettingsRepository ChartSettings { get; }

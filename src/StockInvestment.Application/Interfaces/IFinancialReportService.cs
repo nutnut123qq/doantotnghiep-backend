@@ -1,5 +1,5 @@
 using StockInvestment.Application.Contracts.AI;
-using StockInvestment.Application.DTOs.AnalysisReports;
+using StockInvestment.Application.DTOs.Common;
 using StockInvestment.Domain.Entities;
 
 namespace StockInvestment.Application.Interfaces;

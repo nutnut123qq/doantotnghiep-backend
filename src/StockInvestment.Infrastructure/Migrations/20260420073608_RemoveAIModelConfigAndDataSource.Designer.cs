@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StockInvestment.Infrastructure.Data;
@@ -11,9 +12,11 @@ using StockInvestment.Infrastructure.Data;
 namespace StockInvestment.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260420073608_RemoveAIModelConfigAndDataSource")]
+    partial class RemoveAIModelConfigAndDataSource
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -178,6 +181,55 @@ namespace StockInvestment.Infrastructure.Migrations
                         .HasDatabaseName("IX_Alerts_UserId_IsActive");
 
                     b.ToTable("Alerts", (string)null);
+                });
+
+            modelBuilder.Entity("StockInvestment.Domain.Entities.AnalysisReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FirmName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Recommendation")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SourceUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Symbol")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("TargetPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublishedAt");
+
+                    b.HasIndex("Symbol");
+
+                    b.HasIndex("Symbol", "PublishedAt")
+                        .IsDescending(false, true);
+
+                    b.ToTable("AnalysisReports", (string)null);
                 });
 
             modelBuilder.Entity("StockInvestment.Domain.Entities.AnalyticsEvent", b =>

@@ -1,4 +1,4 @@
-using StockInvestment.Application.DTOs.AnalysisReports;
+using StockInvestment.Application.DTOs.Common;
 using StockInvestment.Application.Contracts.AI;
 using StockInvestment.Domain.Entities;
 

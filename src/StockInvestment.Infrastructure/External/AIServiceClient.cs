@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Http;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.Contracts.AI;
-using StockInvestment.Application.DTOs.AnalysisReports;
+using StockInvestment.Application.DTOs.Common;
 using System.Net;
 using System.Text.Json.Serialization;
 

@@ -1,4 +1,4 @@
-namespace StockInvestment.Application.DTOs.AnalysisReports;
+namespace StockInvestment.Application.DTOs.Common;
 
 public class FinancialSnapshotDto
 {

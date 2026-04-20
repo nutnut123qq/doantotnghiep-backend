@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.Contracts.AI;
-using StockInvestment.Application.DTOs.AnalysisReports;
+using StockInvestment.Application.DTOs.Common;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Infrastructure.Data;
 using System.Text;

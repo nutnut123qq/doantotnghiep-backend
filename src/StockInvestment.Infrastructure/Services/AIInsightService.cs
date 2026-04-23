@@ -1,8 +1,8 @@
 using System.Net.Http;
 using System.Text.Json;
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 using StockInvestment.Application.DTOs.AIInsights;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
@@ -14,7 +14,7 @@ namespace StockInvestment.Infrastructure.Services;
 
 public class AIInsightService : IAIInsightService
 {
-    private static readonly ConcurrentQueue<(Guid TickerId, string Reason)> RefreshQueue = new();
+    private readonly IConnectionMultiplexer _redis;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAIInsightRepository _aiInsightRepository;
     private readonly IStockTickerRepository _stockTickerRepository;
@@ -24,7 +24,10 @@ public class AIInsightService : IAIInsightService
     private readonly ILogger<AIInsightService> _logger;
     private readonly AIInsightGenerationOptions _generationOptions;
 
+    private const string RefreshQueueKey = "insight_refresh_queue";
+
     public AIInsightService(
+        IConnectionMultiplexer redis,
         IUnitOfWork unitOfWork,
         IAIInsightRepository aiInsightRepository,
         IStockTickerRepository stockTickerRepository,
@@ -34,6 +37,7 @@ public class AIInsightService : IAIInsightService
         ILogger<AIInsightService> logger,
         IOptions<AIInsightGenerationOptions> generationOptions)
     {
+        _redis = redis;
         _unitOfWork = unitOfWork;
         _aiInsightRepository = aiInsightRepository;
         _stockTickerRepository = stockTickerRepository;
@@ -262,11 +266,25 @@ public class AIInsightService : IAIInsightService
         var candidates = new List<(Guid TickerId, string Reason)>();
         var queuedSet = new HashSet<Guid>();
 
-        while (RefreshQueue.TryDequeue(out var queued))
+        // Drain distributed Redis queue
+        var db = _redis.GetDatabase();
+        while (!cancellationToken.IsCancellationRequested)
         {
-            if (queuedSet.Add(queued.TickerId))
+            var payload = await db.ListLeftPopAsync(RefreshQueueKey);
+            if (payload.IsNullOrEmpty)
+                break;
+
+            try
             {
-                candidates.Add(queued);
+                var item = JsonSerializer.Deserialize<RefreshQueueItem>(payload!);
+                if (item != null && queuedSet.Add(item.TickerId))
+                {
+                    candidates.Add((item.TickerId, item.Reason));
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to deserialize refresh queue item: {Payload}", payload);
             }
         }
 
@@ -336,11 +354,15 @@ public class AIInsightService : IAIInsightService
         return generatedCount;
     }
 
-    public Task EnqueueTickerForRefreshAsync(Guid tickerId, string reason, CancellationToken cancellationToken = default)
+    public async Task EnqueueTickerForRefreshAsync(Guid tickerId, string reason, CancellationToken cancellationToken = default)
     {
-        RefreshQueue.Enqueue((tickerId, string.IsNullOrWhiteSpace(reason) ? "manual-trigger" : reason));
+        var db = _redis.GetDatabase();
+        var payload = JsonSerializer.Serialize(new RefreshQueueItem(
+            tickerId,
+            string.IsNullOrWhiteSpace(reason) ? "manual-trigger" : reason
+        ));
+        await db.ListRightPushAsync(RefreshQueueKey, payload);
         _logger.LogInformation("Ticker {TickerId} enqueued for insight refresh. Reason={Reason}", tickerId, reason);
-        return Task.CompletedTask;
     }
 
     public async Task DismissInsightAsync(Guid insightId, Guid userId, CancellationToken cancellationToken = default)
@@ -688,4 +710,6 @@ public class AIInsightService : IAIInsightService
     }
 
     private sealed record QualityEvaluation(string Status, int Score, int AdjustedConfidence);
+
+    private sealed record RefreshQueueItem(Guid TickerId, string Reason);
 }

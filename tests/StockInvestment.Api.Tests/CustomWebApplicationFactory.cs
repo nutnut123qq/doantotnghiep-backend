@@ -21,6 +21,7 @@ namespace StockInvestment.Api.Tests;
 /// </summary>
 public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
+    private readonly string _dbName = Guid.NewGuid().ToString("N");
     private bool _usersSeeded;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -32,7 +33,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["JWT:Secret"] = "integration-test-secret-key-at-least-32-characters-long",
-                ["BackgroundJobs:StockPriceUpdateInitialDelaySeconds"] = "0"
+                ["BackgroundJobs:StockPriceUpdateInitialDelaySeconds"] = "0",
+                ["AnalystContext:ApiKey"] = "test-internal-key"
             });
         });
 
@@ -48,7 +50,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 services.Remove(optionsDescriptor);
 
             services.AddDbContext<ApplicationDbContext>(options =>
-                options.UseInMemoryDatabase("TestDb"));
+                options.UseInMemoryDatabase(_dbName));
 
             // Replace Redis cache with in-memory stub
             var cacheDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(ICacheService));
@@ -93,7 +95,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
             if (_usersSeeded) return;
             using var scope = Server.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            if (db.Users.Any()) { _usersSeeded = true; return; }
+            if (db.Users.Any(u => u.Id == TestUserConstants.TestUserId)) { _usersSeeded = true; return; }
             var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
             var testUser = new User
             {

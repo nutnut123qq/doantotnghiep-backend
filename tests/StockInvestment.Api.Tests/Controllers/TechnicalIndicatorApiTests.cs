@@ -25,11 +25,15 @@ public class TechnicalIndicatorApiTests : IClassFixture<CustomWebApplicationFact
 
     [Fact]
     public async Task GetIndicators_WithAuth_ReturnsOk()
-        => Assert.Equal(HttpStatusCode.OK, (await _factory.CreateAuthenticatedClient().GetAsync("api/TechnicalIndicator/VNM")).StatusCode);
+    {
+        await SeedIndicatorsAsync("VNM");
+        Assert.Equal(HttpStatusCode.OK, (await _factory.CreateAuthenticatedClient().GetAsync("api/TechnicalIndicator/VNM")).StatusCode);
+    }
 
     [Fact]
     public async Task GetIndicators_WithAuth_DefaultLiveFalse_ReturnsJsonArray()
     {
+        await SeedIndicatorsAsync("VIC");
         var response = await _factory.CreateAuthenticatedClient().GetAsync("api/TechnicalIndicator/VIC");
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadAsStringAsync();
@@ -41,6 +45,7 @@ public class TechnicalIndicatorApiTests : IClassFixture<CustomWebApplicationFact
     [Fact]
     public async Task GetIndicator_Rsi_WithoutStoredData_ReturnsNotFound()
     {
+        await SeedIndicatorsAsync("VIC", skipRsi: true);
         var response = await _factory.CreateAuthenticatedClient().GetAsync("api/TechnicalIndicator/VIC/RSI?period=14");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -93,7 +98,47 @@ public class TechnicalIndicatorApiTests : IClassFixture<CustomWebApplicationFact
     [Fact]
     public async Task GetIndicators_LiveTrue_ReturnsOk()
     {
+        await SeedIndicatorsAsync("VNM");
         var response = await _factory.CreateAuthenticatedClient().GetAsync("api/TechnicalIndicator/VNM?live=true");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    private async Task SeedIndicatorsAsync(string symbol, bool skipRsi = false)
+    {
+        using var scope = _factory.Server.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var ticker = await db.StockTickers.FirstOrDefaultAsync(t => t.Symbol == symbol);
+        if (ticker == null)
+        {
+            ticker = new StockTicker
+            {
+                Symbol = symbol,
+                Name = symbol,
+                Exchange = Exchange.HOSE,
+                CurrentPrice = 100000m,
+                LastUpdated = DateTime.UtcNow
+            };
+            db.StockTickers.Add(ticker);
+            await db.SaveChangesAsync();
+        }
+
+        db.TechnicalIndicators.RemoveRange(db.TechnicalIndicators.Where(i => i.TickerId == ticker.Id));
+        await db.SaveChangesAsync();
+
+        foreach (var type in new[] { "MA20", "MA50", "RSI", "MACD" })
+        {
+            if (skipRsi && type == "RSI")
+                continue;
+
+            db.TechnicalIndicators.Add(new TechnicalIndicator
+            {
+                TickerId = ticker.Id,
+                IndicatorType = type,
+                Value = 42m,
+                CalculatedAt = DateTime.UtcNow
+            });
+        }
+
+        await db.SaveChangesAsync();
     }
 }

@@ -42,8 +42,11 @@ try
     using var migrationScope = app.Services.CreateScope();
     var dbContext = migrationScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-    Log.Information("Applying database migrations");
-    await dbContext.Database.MigrateAsync();
+    if (dbContext.Database.IsRelational())
+    {
+        Log.Information("Applying database migrations");
+        await dbContext.Database.MigrateAsync();
+    }
     await EnsureDefaultAdminUserAsync(migrationScope.ServiceProvider, dbContext, app.Configuration);
 
     // Configure pipeline using extension methods

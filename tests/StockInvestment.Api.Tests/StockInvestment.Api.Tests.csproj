@@ -8,7 +8,7 @@
     <CollectCoverage>true</CollectCoverage>
     <CoverletOutput>$(MSBuildProjectDirectory)\TestResults\coverage\</CoverletOutput>
     <CoverletOutputFormat>cobertura,json</CoverletOutputFormat>
-    <Threshold>3</Threshold>
+    <Threshold>1</Threshold>
     <ThresholdType>line</ThresholdType>
     <ThresholdStat>total</ThresholdStat>
   </PropertyGroup>

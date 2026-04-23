@@ -1,6 +1,11 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using StockInvestment.Domain.Entities;
+using StockInvestment.Domain.Enums;
+using StockInvestment.Infrastructure.Data;
 using Xunit;
 
 namespace StockInvestment.Api.Tests.Controllers;
@@ -43,6 +48,23 @@ public class StockDataApiTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task GetQuote_Vn30Symbol_ReturnsPayloadWithSymbol()
     {
+        using (var scope = _factory.Server.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            if (!await db.StockTickers.AnyAsync(t => t.Symbol == "VNM"))
+            {
+                db.StockTickers.Add(new StockTicker
+                {
+                    Symbol = "VNM",
+                    Name = "Vinamilk",
+                    Exchange = Exchange.HOSE,
+                    CurrentPrice = 100000m,
+                    LastUpdated = DateTime.UtcNow
+                });
+                await db.SaveChangesAsync();
+            }
+        }
+
         var response = await _factory.CreateAuthenticatedClient().GetAsync("api/StockData/quote/VNM");
         response.EnsureSuccessStatusCode();
 

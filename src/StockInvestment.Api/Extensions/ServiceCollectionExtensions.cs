@@ -242,9 +242,9 @@ public static class ServiceCollectionExtensions
             {
                 ValidateIssuerSigningKey = true,
                 IssuerSigningKey = new SymmetricSecurityKey(key),
-                ValidateIssuer = isProduction, // Validate in production
+                ValidateIssuer = true,
                 ValidIssuer = jwtIssuer,
-                ValidateAudience = isProduction, // Validate in production
+                ValidateAudience = true,
                 ValidAudience = jwtAudience,
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.Zero

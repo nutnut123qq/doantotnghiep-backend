@@ -54,12 +54,11 @@ public class SystemHealthService : ISystemHealthService
             health.BackgroundJobs.Jobs = jobsStatus.Jobs;
 
             // Get performance metrics
-            health.Performance = GetPerformanceMetrics();
+            health.Performance = await GetPerformanceMetricsAsync();
 
-            // Overall health
+            // Overall health: only consider DB and cache since job tracking is not implemented
             health.IsHealthy = health.Database.IsConnected && 
-                              health.Cache.IsConnected && 
-                              health.BackgroundJobs.AllJobsRunning;
+                              health.Cache.IsConnected;
         }
         catch (Exception ex)
         {
@@ -105,67 +104,39 @@ public class SystemHealthService : ISystemHealthService
 
     public Task<BackgroundJobsStatus> GetBackgroundJobsStatusAsync()
     {
-        // In a real implementation, you would track job execution in a shared state
-        // For now, return mock data
+        // TODO: Implement real job execution tracking (e.g. via Redis or database)
+        // so health checks reflect actual job state instead of static data.
+        var knownJobs = new[]
+        {
+            "StockPriceUpdateJob",
+            "AlertMonitorJob",
+            "TechnicalIndicatorCalculationJob",
+            "NewsCrawlerJob",
+            "EventCrawlerJob",
+            "EventRssCrawlerJob"
+        };
+
         var status = new BackgroundJobsStatus
         {
-            Jobs = new List<JobStatus>
+            Jobs = knownJobs.Select(name => new JobStatus
             {
-                new JobStatus 
-                { 
-                    JobName = "StockPriceUpdateJob", 
-                    IsRunning = true, 
-                    LastRunTime = DateTime.UtcNow.AddMinutes(-5),
-                    Status = "Running - Updates every 5 minutes"
-                },
-                new JobStatus 
-                { 
-                    JobName = "AlertMonitorJob", 
-                    IsRunning = true, 
-                    LastRunTime = DateTime.UtcNow.AddMinutes(-1),
-                    Status = "Running - Checks every minute"
-                },
-                new JobStatus 
-                { 
-                    JobName = "TechnicalIndicatorCalculationJob", 
-                    IsRunning = true, 
-                    LastRunTime = DateTime.UtcNow.AddMinutes(-15),
-                    Status = "Running - Updates every 15 minutes"
-                },
-                new JobStatus 
-                { 
-                    JobName = "NewsCrawlerJob", 
-                    IsRunning = true, 
-                    LastRunTime = DateTime.UtcNow.AddMinutes(-30),
-                    Status = "Running - Crawls every 30 minutes"
-                },
-                new JobStatus 
-                { 
-                    JobName = "EventCrawlerJob", 
-                    IsRunning = true, 
-                    LastRunTime = DateTime.UtcNow.AddHours(-6),
-                    Status = "Running - Crawls every 12 hours"
-                },
-                new JobStatus
-                {
-                    JobName = "EventRssCrawlerJob",
-                    IsRunning = true,
-                    LastRunTime = DateTime.UtcNow.AddMinutes(-20),
-                    Status = "Running - EventIngestion:PollMinutes"
-                }
-            }
+                JobName = name,
+                IsRunning = false,
+                LastRunTime = null,
+                Status = "Not tracked"
+            }).ToList()
         };
 
         return Task.FromResult(status);
     }
 
-    private PerformanceMetrics GetPerformanceMetrics()
+    private async Task<PerformanceMetrics> GetPerformanceMetricsAsync()
     {
         var process = Process.GetCurrentProcess();
         
         return new PerformanceMetrics
         {
-            CpuUsagePercent = GetCpuUsage(process),
+            CpuUsagePercent = await GetCpuUsageAsync(process),
             MemoryUsageMB = process.WorkingSet64 / 1024 / 1024,
             TotalMemoryMB = GC.GetTotalMemory(false) / 1024 / 1024,
             ActiveConnections = Process.GetProcesses().Length, // Simplified
@@ -173,14 +144,14 @@ public class SystemHealthService : ISystemHealthService
         };
     }
 
-    private double GetCpuUsage(Process process)
+    private async Task<double> GetCpuUsageAsync(Process process)
     {
         try
         {
             var startTime = DateTime.UtcNow;
             var startCpuUsage = process.TotalProcessorTime;
             
-            System.Threading.Thread.Sleep(100);
+            await Task.Delay(100);
             
             var endTime = DateTime.UtcNow;
             var endCpuUsage = process.TotalProcessorTime;

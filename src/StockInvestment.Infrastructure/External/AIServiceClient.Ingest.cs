@@ -18,15 +18,14 @@ public partial class AIServiceClient
         var apiKey = Environment.GetEnvironmentVariable("AI_SERVICE_INTERNAL_API_KEY");
         if (string.IsNullOrEmpty(apiKey))
         {
-            _logger.LogWarning("AI_SERVICE_INTERNAL_API_KEY not configured, ingest may fail");
+            throw new InvalidOperationException(
+                "AI_SERVICE_INTERNAL_API_KEY environment variable is not configured. " +
+                "Set it to the internal API key shared with the AI service.");
         }
 
         var requestBody = new { document_id = documentId, source, text, metadata };
         var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = JsonContent.Create(requestBody) };
-        if (!string.IsNullOrEmpty(apiKey))
-        {
-            request.Headers.Add("X-Internal-Api-Key", apiKey);
-        }
+        request.Headers.Add("X-Internal-Api-Key", apiKey);
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)

@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -8,7 +10,7 @@ namespace StockInvestment.Api.Controllers;
 
 [ApiController]
 [Route("api")]
-[AllowAnonymous]
+[Authorize]
 public class AnalystContextController : ControllerBase
 {
     private readonly IAnalystContextService _analystContext;
@@ -23,6 +25,13 @@ public class AnalystContextController : ControllerBase
         _analystContext = analystContext;
         _options = options.Value;
         _logger = logger;
+
+        if (string.IsNullOrWhiteSpace(_options.ApiKey))
+        {
+            throw new InvalidOperationException(
+                "AnalystContext:ApiKey must be configured in appsettings.json. " +
+                "Set to a non-empty value or disable the endpoint.");
+        }
     }
 
     private bool TryValidateInternalKey()
@@ -30,15 +39,17 @@ public class AnalystContextController : ControllerBase
         var configured = _options.ApiKey;
         if (string.IsNullOrWhiteSpace(configured))
         {
-            _logger.LogDebug(
-                "AnalystContext:ApiKey is not set; allowing unauthenticated access to analyst context endpoints.");
-            return true;
+            _logger.LogWarning(
+                "AnalystContext:ApiKey is not set; rejecting unauthenticated access to analyst context endpoints.");
+            return false;
         }
 
         if (!Request.Headers.TryGetValue("X-Internal-Api-Key", out var provided))
             return false;
 
-        return string.Equals(provided.ToString(), configured, StringComparison.Ordinal);
+        return CryptographicOperations.FixedTimeEquals(
+            MemoryMarshal.AsBytes(provided.ToString().AsSpan()),
+            MemoryMarshal.AsBytes(configured.AsSpan()));
     }
 
     /// <summary>

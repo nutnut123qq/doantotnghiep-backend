@@ -241,36 +241,58 @@ public class FinancialReportService : IFinancialReportService
             .Select(t => t.Symbol)
             .FirstOrDefaultAsync();
 
+        // Fetch recent reports for trend analysis (up to 6 latest quarters)
+        var recentReports = await _context.FinancialReports
+            .Where(r => r.TickerId == report.TickerId && !r.IsDeleted)
+            .OrderByDescending(r => r.ReportDate)
+            .ThenByDescending(r => r.Year)
+            .ThenByDescending(r => r.Quarter ?? 0)
+            .Take(6)
+            .ToListAsync();
+
         var contextBuilder = new StringBuilder();
-        contextBuilder.AppendLine("FINANCIAL REPORT CONTEXT");
-        contextBuilder.AppendLine($"Report: {report.ReportType} {report.Year}{(report.Quarter.HasValue ? $" Q{report.Quarter}" : string.Empty)}");
-        contextBuilder.AppendLine($"ReportDate: {report.ReportDate:yyyy-MM-dd}");
-        contextBuilder.AppendLine($"Symbol: {symbol ?? "N/A"}");
+        contextBuilder.AppendLine("Bạn là trợ lý phân tích tài chính chuyên nghiệp.");
+        contextBuilder.AppendLine("Bạn có quyền truy cập vào nhiều kỳ báo cáo tài chính để trả lờicâu hỏi.");
+        contextBuilder.AppendLine("Hãy phân tích xu hướng, so sánh với kỳ trước và cùng kỳ năm trước nếu có thể.");
+        contextBuilder.AppendLine("Trả lờingắn gọn, bằng tiếng Việt, chỉ dựa trên dữ liệu được cung cấp.");
         contextBuilder.AppendLine();
-        contextBuilder.AppendLine("CONTENT:");
-        contextBuilder.AppendLine(Cap(report.Content, 12000));
+        contextBuilder.AppendLine($"Mã cổ phiếu: {symbol ?? "N/A"}");
+        contextBuilder.AppendLine();
+
+        foreach (var r in recentReports.OrderByDescending(r => r.ReportDate))
+        {
+            var periodLabel = BuildPeriodLabel(r);
+            contextBuilder.AppendLine($"--- Báo cáo: {periodLabel} ---");
+            contextBuilder.AppendLine($"Ngày báo cáo: {r.ReportDate:yyyy-MM-dd}");
+            contextBuilder.AppendLine("Nội dung:");
+            contextBuilder.AppendLine(Cap(r.Content, 4000));
+            contextBuilder.AppendLine();
+        }
 
         var baseContext = contextBuilder.ToString().Trim();
 
-        // Ingest document for RAG (best-effort)
-        try
+        // Ingest documents for RAG (best-effort)
+        foreach (var r in recentReports)
         {
-            await _aiService.IngestDocumentAsync(
-                documentId: report.Id.ToString(),
-                source: "financial_report",
-                text: report.Content,
-                metadata: new
-                {
-                    symbol,
-                    reportType = report.ReportType,
-                    year = report.Year,
-                    quarter = report.Quarter,
-                    reportDate = report.ReportDate
-                });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to ingest financial report {ReportId} for RAG", report.Id);
+            try
+            {
+                await _aiService.IngestDocumentAsync(
+                    documentId: r.Id.ToString(),
+                    source: "financial_report",
+                    text: r.Content,
+                    metadata: new
+                    {
+                        symbol,
+                        reportType = r.ReportType,
+                        year = r.Year,
+                        quarter = r.Quarter,
+                        reportDate = r.ReportDate
+                    });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to ingest financial report {ReportId} for RAG", r.Id);
+            }
         }
 
         var result = await _aiService.AnswerQuestionAsync(
@@ -280,8 +302,8 @@ public class FinancialReportService : IFinancialReportService
             source: "financial_report",
             symbol: symbol,
             topK: 6);
-        
-        _logger.LogInformation("Answered question for report {ReportId}", reportId);
+
+        _logger.LogInformation("Answered question for report {ReportId} with {Count} recent reports", reportId, recentReports.Count);
         return result;
     }
 

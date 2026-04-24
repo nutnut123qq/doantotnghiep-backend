@@ -59,6 +59,9 @@ public class FinancialReportCrawlerService : IFinancialReportCrawlerService
                 .Take(maxReports)
                 .ToList();
 
+            // Merge supplemental financial data from yfinance (GrossProfit, OperatingProfit, Equity)
+            await MergeYFinanceSupplementAsync(symbol, reports);
+
             _logger.LogInformation("Crawled {Count} financial reports for {Symbol} from {SourceCount} configured sources", reports.Count, symbol, sources.Count);
         }
         catch (Exception ex)
@@ -67,6 +70,66 @@ public class FinancialReportCrawlerService : IFinancialReportCrawlerService
         }
 
         return reports;
+    }
+
+    private async Task MergeYFinanceSupplementAsync(string symbol, List<FinancialReport> reports)
+    {
+        if (reports.Count == 0)
+            return;
+
+        try
+        {
+            var aiClient = _httpClientFactory.CreateClient("AIService");
+            var response = await aiClient.GetAsync($"/financial/yfinance/{symbol}");
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("YFinance supplement returned {Status} for {Symbol}", response.StatusCode, symbol);
+                return;
+            }
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var grossProfit = ReadNullableDecimalFromJson(root, "gross_profit");
+            var operatingProfit = ReadNullableDecimalFromJson(root, "operating_profit");
+            var equity = ReadNullableDecimalFromJson(root, "equity");
+            var totalAssets = ReadNullableDecimalFromJson(root, "total_assets");
+
+            if (grossProfit == null && operatingProfit == null && equity == null)
+            {
+                _logger.LogInformation("No yfinance supplement data available for {Symbol}", symbol);
+                return;
+            }
+
+            // Merge into the latest report (most recent ReportDate)
+            var latestReport = reports.OrderByDescending(r => r.ReportDate).First();
+            var contentDict = JsonSerializer.Deserialize<Dictionary<string, object?>>(latestReport.Content, JsonWriteOptions)
+                ?? new Dictionary<string, object?>();
+
+            contentDict["GrossProfit"] = grossProfit;
+            contentDict["OperatingProfit"] = operatingProfit;
+            contentDict["Equity"] = equity;
+            contentDict["TotalAssets"] = totalAssets;
+            contentDict["Source"] = $"{contentDict.GetValueOrDefault("Source")?.ToString() ?? "VietCap"}+yfinance";
+
+            latestReport.Content = JsonSerializer.Serialize(contentDict, JsonWriteOptions);
+            _logger.LogInformation("Merged yfinance supplement into latest report for {Symbol} (GrossProfit={GP}, OperatingProfit={OP}, Equity={EQ})",
+                symbol, grossProfit, operatingProfit, equity);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error merging yfinance supplement for {Symbol}", symbol);
+        }
+    }
+
+    private static decimal? ReadNullableDecimalFromJson(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var el) || el.ValueKind == JsonValueKind.Null)
+            return null;
+        if (el.ValueKind == JsonValueKind.Number && el.TryGetDecimal(out var d))
+            return d;
+        return null;
     }
 
     private List<NewsSourceConfig> ResolveFinancialSources()

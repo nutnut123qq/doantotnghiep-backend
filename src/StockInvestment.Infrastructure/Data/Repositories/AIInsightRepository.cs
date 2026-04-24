@@ -103,7 +103,6 @@ public class AIInsightRepository : Repository<AIInsight>, IAIInsightRepository
         CancellationToken cancellationToken = default)
     {
         var baseQuery = _dbSet
-            .Include(i => i.Ticker)
             .Where(i => i.DismissedAt == null)
             .AsQueryable();
 
@@ -122,20 +121,21 @@ public class AIInsightRepository : Repository<AIInsight>, IAIInsightRepository
             baseQuery = baseQuery.Where(i => i.Ticker.Symbol == symbol.ToUpper());
         }
 
-        var latestIds = await baseQuery
-            .GroupBy(i => i.TickerId)
-            .Select(g => g
+        // Use correlated subquery to reliably get the latest insight per ticker.
+        // EF Core GroupBy+OrderBy+First translation is unstable on PostgreSQL.
+        var insights = await baseQuery
+            .Include(i => i.Ticker)
+            .Where(i => i.Id == baseQuery
+                .Where(x => x.TickerId == i.TickerId)
                 .OrderByDescending(x => x.GeneratedAt)
+                .ThenByDescending(x => x.Id)
                 .Select(x => x.Id)
                 .First())
-            .ToListAsync(cancellationToken);
-
-        return await _dbSet
-            .Include(i => i.Ticker)
-            .Where(i => latestIds.Contains(i.Id))
             .OrderByDescending(i => i.GeneratedAt)
             .ThenByDescending(i => i.Confidence)
             .ToListAsync(cancellationToken);
+
+        return insights;
     }
 
     public async Task HidePreviousInsightsAsync(

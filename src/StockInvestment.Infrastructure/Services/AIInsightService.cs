@@ -164,11 +164,14 @@ public class AIInsightService : IAIInsightService
             var enrichedReasoning = BuildEnrichedReasoning(aiResult, qualityResult, technicalData, sentimentData, ticker);
             var adjustedConfidence = Math.Min(aiResult.Confidence, qualityResult.AdjustedConfidence);
 
-            // Check if insight already exists for this ticker and type
-            var existingInsight = await _aiInsightRepository.FindActiveInsightAsync(tickerId, insightType, cancellationToken);
-
             // Serialize reasoning to JSON
             var reasoningJson = JsonSerializer.Serialize(enrichedReasoning);
+
+            // Hide any previous visible insights for this ticker so only the newest one remains visible
+            await _aiInsightRepository.HidePreviousInsightsAsync(tickerId, cancellationToken: cancellationToken);
+
+            // Check if an insight already exists for this ticker and type (may have just been hidden above if different type)
+            var existingInsight = await _aiInsightRepository.FindActiveInsightAsync(tickerId, insightType, cancellationToken);
 
             if (existingInsight != null)
             {
@@ -181,6 +184,8 @@ public class AIInsightService : IAIInsightService
                 existingInsight.StopLoss = aiResult.StopLoss;
                 existingInsight.GeneratedAt = aiResult.GeneratedAt;
                 existingInsight.UpdatedAt = DateTime.UtcNow;
+                existingInsight.IsDeleted = false;
+                existingInsight.DismissedAt = null;
 
                 await _aiInsightRepository.UpdateAsync(existingInsight);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -193,9 +198,6 @@ public class AIInsightService : IAIInsightService
             }
             else
             {
-                // Hide any previous visible insights for this ticker so only the newest one remains visible
-                await _aiInsightRepository.HidePreviousInsightsAsync(tickerId, cancellationToken: cancellationToken);
-
                 // Create new insight
                 var insight = new AIInsight
                 {

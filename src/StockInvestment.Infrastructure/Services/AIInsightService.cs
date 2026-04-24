@@ -659,7 +659,15 @@ public class AIInsightService : IAIInsightService
     private static Dictionary<string, string> ParseMetadata(string reasoningJson)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var reasoning = JsonSerializer.Deserialize<List<string>>(reasoningJson) ?? new List<string>();
+        List<string> reasoning;
+        try
+        {
+            reasoning = JsonSerializer.Deserialize<List<string>>(reasoningJson) ?? new List<string>();
+        }
+        catch (JsonException)
+        {
+            return result;
+        }
         foreach (var line in reasoning)
         {
             if (!line.StartsWith("[META] ", StringComparison.OrdinalIgnoreCase))

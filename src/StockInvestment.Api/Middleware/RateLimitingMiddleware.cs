@@ -41,8 +41,9 @@ public class RateLimitingMiddleware
             return;
         }
 
-        // Skip rate limiting for health checks
-        if (context.Request.Path.StartsWithSegments("/health"))
+        // Skip rate limiting for health checks and long-polling forecast job status
+        if (context.Request.Path.StartsWithSegments("/health") ||
+            context.Request.Path.Value?.Contains("/Forecast/langgraph/jobs/", StringComparison.OrdinalIgnoreCase) == true)
         {
             await _next(context);
             return;
@@ -131,7 +132,7 @@ public class RateLimitingOptions
 {
     public int GlobalRequestsPerMinute { get; set; } = 100;
     public int AuthRequestsPerMinute { get; set; } = 5;
-    public int ApiRequestsPerMinute { get; set; } = 60;
+    public int ApiRequestsPerMinute { get; set; } = 100;
     public bool EnableRateLimiting { get; set; } = true;
 }
 

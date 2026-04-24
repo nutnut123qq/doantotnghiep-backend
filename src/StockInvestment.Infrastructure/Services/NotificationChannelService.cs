@@ -147,13 +147,14 @@ public class NotificationChannelService : INotificationChannelService
             .FirstOrDefault();
         
         // Build variables ({AiExplanation} kept empty for older templates still stored in DB)
+        // Threshold is stored as thousand-VND; CurrentValue comes from Ticker.CurrentPrice in full VND.
         var variables = new Dictionary<string, string>
         {
             { "Symbol", context.Alert.Ticker?.Symbol ?? "Unknown" },
             { "AlertType", context.Alert.Type.ToString() },
             { "Operator", context.Operator },  // Use directly
-            { "Threshold", FormatAlertMetric(context.Alert.Type, context.Alert.Threshold) },
-            { "CurrentValue", FormatAlertMetric(context.Alert.Type, context.CurrentValue) },
+            { "Threshold", FormatAlertMetric(context.Alert.Type, context.Alert.Threshold, isStoredAsThousandVnd: true) },
+            { "CurrentValue", FormatAlertMetric(context.Alert.Type, context.CurrentValue, isStoredAsThousandVnd: false) },
             { "Time", context.TriggeredAt.ToString("yyyy-MM-dd HH:mm:ss") },
             { "AiExplanation", string.Empty }
         };
@@ -246,17 +247,17 @@ public class NotificationChannelService : INotificationChannelService
     private static string BuildFallbackAlertMessage(AlertTriggeredContext context)
     {
         var symbol = context.Alert.Ticker?.Symbol ?? "Unknown";
-        var threshold = FormatAlertMetric(context.Alert.Type, context.Alert.Threshold);
-        var currentValue = FormatAlertMetric(context.Alert.Type, context.CurrentValue);
+        var threshold = FormatAlertMetric(context.Alert.Type, context.Alert.Threshold, isStoredAsThousandVnd: true);
+        var currentValue = FormatAlertMetric(context.Alert.Type, context.CurrentValue, isStoredAsThousandVnd: false);
         var alertType = context.Alert.Type.ToString();
 
         return $"[{alertType}] {symbol} triggered: Current {currentValue} {context.Operator} Threshold {threshold} at {context.TriggeredAt:yyyy-MM-dd HH:mm:ss}";
     }
 
-    private static string FormatAlertMetric(AlertType alertType, decimal? value)
+    private static string FormatAlertMetric(AlertType alertType, decimal? value, bool isStoredAsThousandVnd = true)
     {
         var raw = value ?? 0m;
-        var normalized = alertType == AlertType.Price ? raw * 1000m : raw;
+        var normalized = alertType == AlertType.Price && isStoredAsThousandVnd ? raw * 1000m : raw;
         return normalized.ToString("N0", ViVnCulture);
     }
 

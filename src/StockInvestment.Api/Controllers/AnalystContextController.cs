@@ -55,6 +55,7 @@ public class AnalystContextController : ControllerBase
     /// <summary>
     /// Plain-text recent news for a symbol (for external AI analyst services).
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("rag/news-context")]
     public async Task<IActionResult> GetNewsContext(
         [FromQuery] string symbol,
@@ -75,6 +76,7 @@ public class AnalystContextController : ControllerBase
     /// <summary>
     /// Plain-text technical summary (OHLCV window + indicators) for a symbol.
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("market/{symbol}/tech-summary")]
     public async Task<IActionResult> GetTechSummary(
         string symbol,

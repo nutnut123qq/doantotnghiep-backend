@@ -13,6 +13,6 @@ public class StockAnalystOptions
     /// <summary>Base URL of the Python <c>ai</c> app. When empty, HttpClient setup falls back to AIService:BaseUrl.</summary>
     public string? BaseUrl { get; set; }
 
-    /// <summary>HTTP timeout for multi-node graph (default 180s).</summary>
-    public int TimeoutSeconds { get; set; } = 180;
+    /// <summary>HTTP timeout for multi-node graph (default 300s).</summary>
+    public int TimeoutSeconds { get; set; } = 300;
 }

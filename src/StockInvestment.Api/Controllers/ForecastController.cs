@@ -373,7 +373,7 @@ public class ForecastController : ControllerBase
 
         // 1. Check our inline background-job state first (no external RQ worker needed).
         var jobState = await _cacheService.GetAsync<LangGraphJobState>($"forecast_job:{jobId}");
-        if (jobState != null)
+        if (jobState != null && !string.IsNullOrWhiteSpace(jobState.Status))
         {
             var stateStatus = jobState.Status.ToLowerInvariant();
 

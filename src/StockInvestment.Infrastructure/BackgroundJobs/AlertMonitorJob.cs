@@ -253,9 +253,8 @@ public class AlertMonitorJob : BackgroundService
             var displayThreshold = alert.Type == AlertType.Price && alert.Threshold.HasValue
                 ? alert.Threshold.Value * 1000m
                 : alert.Threshold;
-            var displayCurrentValue = alert.Type == AlertType.Price
-                ? context.CurrentValue * 1000m
-                : context.CurrentValue;
+            // CurrentValue already comes from Ticker.CurrentPrice which is stored in full VND.
+            var displayCurrentValue = context.CurrentValue;
 
             var notification = new
             {

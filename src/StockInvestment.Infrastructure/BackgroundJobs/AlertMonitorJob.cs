@@ -191,15 +191,18 @@ public class AlertMonitorJob : BackgroundService
             return false;
 
         var currentPrice = alert.Ticker.CurrentPrice;
+        // Frontend sends threshold in thousand-VND to keep payloads small;
+        // CurrentPrice is stored in full VND after normalization.
+        var thresholdVnd = alert.Threshold.Value * 1000m;
         var normalizedOperator = GetOperator(alert);
 
         return normalizedOperator switch
         {
-            ">" => currentPrice > alert.Threshold.Value,
-            "<" => currentPrice < alert.Threshold.Value,
-            ">=" => currentPrice >= alert.Threshold.Value,
-            "<=" => currentPrice <= alert.Threshold.Value,
-            "=" => Math.Abs(currentPrice - alert.Threshold.Value) < 0.01m,
+            ">" => currentPrice > thresholdVnd,
+            "<" => currentPrice < thresholdVnd,
+            ">=" => currentPrice >= thresholdVnd,
+            "<=" => currentPrice <= thresholdVnd,
+            "=" => Math.Abs(currentPrice - thresholdVnd) < 0.01m,
             _ => false
         };
     }
@@ -246,14 +249,22 @@ public class AlertMonitorJob : BackgroundService
             var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<TradingHub>>();
 
             // camelCase payload cho frontend
+            // Align price units: CurrentPrice is full VND; threshold is stored as thousand-VND.
+            var displayThreshold = alert.Type == AlertType.Price && alert.Threshold.HasValue
+                ? alert.Threshold.Value * 1000m
+                : alert.Threshold;
+            var displayCurrentValue = alert.Type == AlertType.Price
+                ? context.CurrentValue * 1000m
+                : context.CurrentValue;
+
             var notification = new
             {
                 alertId = alert.Id,
                 symbol = alert.Ticker?.Symbol ?? "Unknown",
                 tickerName = alert.Ticker?.Name ?? "Unknown",
                 type = alert.Type.ToString(),
-                threshold = alert.Threshold,
-                currentValue = context.CurrentValue,
+                threshold = displayThreshold,
+                currentValue = displayCurrentValue,
                 triggeredAt = alert.TriggeredAt
             };
 

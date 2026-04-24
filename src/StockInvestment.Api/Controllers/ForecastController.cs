@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using StockInvestment.Application.Configuration;
 using StockInvestment.Application.Interfaces;
@@ -23,6 +24,7 @@ public class ForecastController : ControllerBase
     private readonly IOptions<StockAnalystOptions> _stockAnalystOptions;
     private readonly ILangGraphForecastClient _langGraphForecastClient;
     private readonly ILangGraphForecastMapper _langGraphForecastMapper;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public ForecastController(
         IAIService aiService,
@@ -32,7 +34,8 @@ public class ForecastController : ControllerBase
         ICacheKeyGenerator cacheKeyGenerator,
         IOptions<StockAnalystOptions> stockAnalystOptions,
         ILangGraphForecastClient langGraphForecastClient,
-        ILangGraphForecastMapper langGraphForecastMapper)
+        ILangGraphForecastMapper langGraphForecastMapper,
+        IServiceScopeFactory scopeFactory)
     {
         _aiService = aiService;
         _technicalDataService = technicalDataService;
@@ -42,6 +45,21 @@ public class ForecastController : ControllerBase
         _stockAnalystOptions = stockAnalystOptions;
         _langGraphForecastClient = langGraphForecastClient;
         _langGraphForecastMapper = langGraphForecastMapper;
+        _scopeFactory = scopeFactory;
+    }
+
+    /// <summary>
+    /// In-memory tracking of running background LangGraph jobs (used when we run
+    /// the analysis inline instead of via an external RQ worker).
+    /// </summary>
+    private class LangGraphJobState
+    {
+        public string Status { get; set; } = "running";
+        public string? Symbol { get; set; }
+        public string? TimeHorizon { get; set; }
+        public ForecastResult? Result { get; set; }
+        public string? Error { get; set; }
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 
     /// <summary>
@@ -233,121 +251,106 @@ public class ForecastController : ControllerBase
             return Ok(cached);
         }
 
-        try
+        // Spawn the long-running LangGraph analysis in a background task
+        // so the HTTP response returns immediately (202) while Beeknoee
+        // processes the 10-node pipeline without holding the request open.
+        var jobId = Guid.NewGuid().ToString("N");
+        var jobState = new LangGraphJobState
         {
-            var job = await _langGraphForecastClient.EnqueueAnalyzeAsync(symbol, cancellationToken);
-            if (job == null)
-            {
-                return StatusCode(503, new
-                {
-                    error = "Stock analyst unavailable",
-                    message = "Dịch vụ phân tích LangGraph không phản hồi khi tạo job. Vui lòng thử lại sau.",
-                    symbol
-                });
-            }
+            Status = "running",
+            Symbol = symbol,
+            TimeHorizon = timeHorizon,
+        };
+        await _cacheService.SetAsync($"forecast_job:{jobId}", jobState, TimeSpan.FromHours(1));
 
-            // Python returned an inline cache hit — short-circuit to the mapped result.
-            if (string.Equals(job.Status, "completed", StringComparison.OrdinalIgnoreCase)
-                && job.Result != null)
+        _ = Task.Run(async () =>
+        {
+            try
             {
-                var forecast = _langGraphForecastMapper.Map(job.Result, symbol, timeHorizon);
-                await _cacheService.SetAsync(cacheKey, forecast, TimeSpan.FromHours(8));
-                return Ok(forecast);
-            }
+                using var scope = _scopeFactory.CreateScope();
+                var client = scope.ServiceProvider.GetRequiredService<ILangGraphForecastClient>();
+                var cache = scope.ServiceProvider.GetRequiredService<ICacheService>();
+                var mapper = scope.ServiceProvider.GetRequiredService<ILangGraphForecastMapper>();
+                var logger = scope.ServiceProvider.GetRequiredService<ILogger<ForecastController>>();
 
-            if (string.IsNullOrWhiteSpace(job.JobId))
-            {
-                _logger.LogWarning(
-                    "LangGraph enqueue returned no jobId for {Symbol} (status={Status})",
+                logger.LogInformation(
+                    "Background LangGraph analysis started for {Symbol} job={JobId}",
                     symbol,
-                    job.Status);
-                return StatusCode(503, new
+                    jobId);
+
+                var response = await client.AnalyzeAsync(symbol, CancellationToken.None);
+                if (response != null)
                 {
-                    error = "Stock analyst unavailable",
-                    message = "Dịch vụ phân tích LangGraph không trả về jobId. Vui lòng thử lại sau.",
-                    symbol
-                });
-            }
+                    var forecast = mapper.Map(response, symbol, timeHorizon);
+                    await cache.SetAsync(cacheKey, forecast, TimeSpan.FromHours(8));
 
-            _logger.LogInformation(
-                "Enqueued LangGraph forecast job {JobId} for {Symbol} (status={Status})",
-                job.JobId,
-                symbol,
-                job.Status);
+                    jobState.Status = "completed";
+                    jobState.Result = forecast;
+                    await cache.SetAsync($"forecast_job:{jobId}", jobState, TimeSpan.FromHours(8));
 
-            return StatusCode(202, new
-            {
-                status = (job.Status ?? "queued").ToLowerInvariant(),
-                jobId = job.JobId,
-                symbol,
-                timeHorizon
-            });
-        }
-        catch (TaskCanceledException tcEx) when (!cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogWarning(tcEx, "LangGraph enqueue timed out for {Symbol}", symbol);
-            var staleForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-            if (staleForecast != null)
-            {
-                _logger.LogWarning("Returning stale LangGraph cache for {Symbol} due to enqueue timeout", symbol);
-                return Ok(staleForecast);
-            }
-
-            return StatusCode(504, new
-            {
-                error = "Stock analyst timeout",
-                message = "Dịch vụ phân tích LangGraph không phản hồi khi tạo job. Vui lòng thử lại sau ít phút.",
-                symbol
-            });
-        }
-        catch (HttpRequestException httpEx)
-        {
-            var status = ExtractStatusCode(httpEx);
-            _logger.LogError(httpEx, "LangGraph enqueue HTTP error for {Symbol} status {Status}", symbol, status);
-
-            if (status >= 500 || status == null)
-            {
-                var staleForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-                if (staleForecast != null)
-                {
-                    _logger.LogWarning(
-                        "Returning stale LangGraph cache for {Symbol} due to enqueue 5xx ({Status})",
+                    logger.LogInformation(
+                        "Background LangGraph analysis completed for {Symbol} job={JobId}",
                         symbol,
-                        status);
-                    return Ok(staleForecast);
+                        jobId);
+                }
+                else
+                {
+                    jobState.Status = "failed";
+                    jobState.Error = "AI service returned empty analysis";
+                    await cache.SetAsync($"forecast_job:{jobId}", jobState, TimeSpan.FromHours(1));
+
+                    logger.LogWarning(
+                        "Background LangGraph analysis returned empty for {Symbol} job={JobId}",
+                        symbol,
+                        jobId);
                 }
             }
+            catch (Exception ex)
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var cache = scope.ServiceProvider.GetRequiredService<ICacheService>();
+                    var logger = scope.ServiceProvider.GetRequiredService<ILogger<ForecastController>>();
 
-            return StatusCode(503, new
-            {
-                error = "Stock analyst unavailable",
-                message = $"Không gọi được dịch vụ LangGraph ({status}): {httpEx.Message}",
-                symbol
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "LangGraph enqueue failed for {Symbol}", symbol);
-            var staleForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-            if (staleForecast != null)
-            {
-                _logger.LogWarning("Returning stale LangGraph cache for {Symbol} after enqueue exception", symbol);
-                return Ok(staleForecast);
+                    jobState.Status = "failed";
+                    jobState.Error = ex.Message;
+                    await cache.SetAsync($"forecast_job:{jobId}", jobState, TimeSpan.FromHours(1));
+
+                    logger.LogError(
+                        ex,
+                        "Background LangGraph analysis failed for {Symbol} job={JobId}",
+                        symbol,
+                        jobId);
+                }
+                catch (Exception inner)
+                {
+                    _logger.LogError(
+                        inner,
+                        "Failed to persist error state for {Symbol} job={JobId}",
+                        symbol,
+                        jobId);
+                }
             }
+        }, CancellationToken.None);
 
-            return StatusCode(503, new
-            {
-                error = "Stock analyst error",
-                message = "Lỗi khi tạo job phân tích LangGraph. Vui lòng thử lại sau.",
-                symbol,
-                details = ex.Message
-            });
-        }
+        _logger.LogInformation(
+            "Accepted LangGraph forecast job {JobId} for {Symbol} (background task spawned)",
+            jobId,
+            symbol);
+
+        return StatusCode(202, new
+        {
+            status = "running",
+            jobId,
+            symbol,
+            timeHorizon
+        });
     }
 
     /// <summary>
     /// Poll the status of an enqueued LangGraph forecast job.
-    /// Returns the mapped <see cref="ForecastResult"/> once Python reports <c>completed</c>,
+    /// Returns the mapped <see cref="ForecastResult"/> once the background task reports <c>completed</c>,
     /// HTTP 202 while the job is still running, or an error payload on failure.
     /// </summary>
     [HttpGet("langgraph/jobs/{jobId}")]
@@ -368,101 +371,65 @@ public class ForecastController : ControllerBase
 
         var cacheKey = _cacheKeyGenerator.GenerateLangGraphForecastKey(symbol, timeHorizon);
 
-        LangGraphJobResponse? job;
-        try
+        // 1. Check our inline background-job state first (no external RQ worker needed).
+        var jobState = await _cacheService.GetAsync<LangGraphJobState>($"forecast_job:{jobId}");
+        if (jobState != null)
         {
-            job = await _langGraphForecastClient.GetAnalyzeJobAsync(jobId, cancellationToken);
-        }
-        catch (TaskCanceledException tcEx) when (!cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogWarning(tcEx, "LangGraph poll timed out for job {JobId}", jobId);
-            return StatusCode(504, new
-            {
-                error = "Stock analyst timeout",
-                message = "Không lấy được trạng thái job LangGraph. Vui lòng thử lại sau.",
-                jobId
-            });
-        }
-        catch (HttpRequestException httpEx)
-        {
-            var status = ExtractStatusCode(httpEx);
-            _logger.LogError(httpEx, "LangGraph poll HTTP error for job {JobId} ({Status})", jobId, status);
+            var stateStatus = jobState.Status.ToLowerInvariant();
 
-            if (status >= 500 || status == null)
+            if (stateStatus == "completed" && jobState.Result != null)
             {
+                await _cacheService.SetAsync(cacheKey, jobState.Result, TimeSpan.FromHours(8));
+                return Ok(jobState.Result);
+            }
+
+            if (stateStatus == "failed")
+            {
+                _logger.LogWarning(
+                    "LangGraph background job {JobId} failed for {Symbol}: {Error}",
+                    jobId,
+                    symbol,
+                    jobState.Error);
+
                 var staleForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
                 if (staleForecast != null)
                 {
-                    _logger.LogWarning("Returning stale LangGraph cache for {Symbol} due to poll 5xx", symbol);
+                    _logger.LogWarning("Returning stale LangGraph cache for {Symbol} after job failure", symbol);
                     return Ok(staleForecast);
                 }
+
+                return StatusCode(500, new
+                {
+                    error = "Stock analyst failed",
+                    message = "Phân tích LangGraph gặp lỗi. Vui lòng thử lại sau.",
+                    jobId,
+                    details = jobState.Error
+                });
             }
 
-            return StatusCode(503, new
+            // Still running
+            return StatusCode(202, new
             {
-                error = "Stock analyst unavailable",
-                message = $"Không gọi được dịch vụ LangGraph ({status}): {httpEx.Message}",
-                jobId
-            });
-        }
-
-        if (job == null)
-        {
-            // Python returned 404 — job expired. Fall back to stale cache if we have one.
-            var staleForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-            if (staleForecast != null)
-            {
-                _logger.LogInformation("LangGraph job {JobId} expired; returning stale cache for {Symbol}", jobId, symbol);
-                return Ok(staleForecast);
-            }
-
-            return StatusCode(404, new
-            {
-                error = "Job not found",
-                message = "Job phân tích LangGraph không còn tồn tại. Vui lòng bấm Thử lại để tạo lần mới.",
-                jobId
-            });
-        }
-
-        var jobStatus = (job.Status ?? string.Empty).ToLowerInvariant();
-
-        if (jobStatus == "completed" && job.Result != null)
-        {
-            var forecast = _langGraphForecastMapper.Map(job.Result, symbol, timeHorizon);
-            await _cacheService.SetAsync(cacheKey, forecast, TimeSpan.FromHours(8));
-            return Ok(forecast);
-        }
-
-        if (jobStatus == "failed")
-        {
-            _logger.LogWarning(
-                "LangGraph job {JobId} failed for {Symbol}: {Error}",
+                status = "running",
                 jobId,
                 symbol,
-                job.Error);
-
-            var staleForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-            if (staleForecast != null)
-            {
-                _logger.LogWarning("Returning stale LangGraph cache for {Symbol} after job failure", symbol);
-                return Ok(staleForecast);
-            }
-
-            return StatusCode(500, new
-            {
-                error = "Stock analyst failed",
-                message = "Phân tích LangGraph gặp lỗi. Vui lòng thử lại sau.",
-                jobId,
-                details = job.Error
+                timeHorizon
             });
         }
 
-        return StatusCode(202, new
+        // 2. Fallback to stale cache if the job state expired but a result exists.
+        var stale = await _cacheService.GetAsync<ForecastResult>(cacheKey);
+        if (stale != null)
         {
-            status = string.IsNullOrWhiteSpace(jobStatus) ? "queued" : jobStatus,
-            jobId,
-            symbol,
-            timeHorizon
+            _logger.LogInformation("LangGraph job {JobId} state expired; returning stale cache for {Symbol}", jobId, symbol);
+            return Ok(stale);
+        }
+
+        return StatusCode(404, new
+        {
+            error = "Job not found",
+            message = "Job phân tích LangGraph không còn tồn tại. Vui lòng bấm Thử lại để tạo lần mới.",
+            jobId
         });
     }
 

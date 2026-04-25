@@ -29,6 +29,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<ChartSettings> ChartSettings { get; set; } = null!;
     public DbSet<NotificationChannelConfig> NotificationChannelConfigs { get; set; } = null!;
     public DbSet<AdminAuditLog> AdminAuditLogs { get; set; } = null!;
+    public DbSet<StockPrice> StockPrices { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -265,6 +266,23 @@ public class ApplicationDbContext : DbContext
 
         modelBuilder.Entity<AdminAuditLog>()
             .HasIndex(a => a.CreatedAt);
+
+        // Configure StockPrice
+        modelBuilder.Entity<StockPrice>()
+            .ToTable("StockPrices");
+
+        modelBuilder.Entity<StockPrice>()
+            .HasIndex(sp => new { sp.Symbol, sp.Date })
+            .IsUnique()
+            .HasDatabaseName("IX_StockPrices_Symbol_Date");
+
+        modelBuilder.Entity<StockPrice>()
+            .HasIndex(sp => sp.Symbol)
+            .HasDatabaseName("IX_StockPrices_Symbol");
+
+        modelBuilder.Entity<StockPrice>()
+            .HasIndex(sp => sp.Date)
+            .HasDatabaseName("IX_StockPrices_Date");
     }
 }
 

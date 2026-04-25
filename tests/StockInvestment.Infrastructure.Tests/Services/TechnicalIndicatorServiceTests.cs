@@ -11,6 +11,7 @@ namespace StockInvestment.Infrastructure.Tests.Services;
 public class TechnicalIndicatorServiceTests
 {
     private readonly Mock<IVNStockService> _mockVnStockService;
+    private readonly Mock<IUnitOfWork> _mockUnitOfWork;
     private readonly Mock<ICacheService> _mockCacheService;
     private readonly Mock<ICacheKeyGenerator> _mockCacheKeyGenerator;
     private readonly Mock<ILogger<TechnicalIndicatorService>> _mockLogger;
@@ -19,9 +20,19 @@ public class TechnicalIndicatorServiceTests
     public TechnicalIndicatorServiceTests()
     {
         _mockVnStockService = new Mock<IVNStockService>();
+        _mockUnitOfWork = new Mock<IUnitOfWork>();
         _mockCacheService = new Mock<ICacheService>();
         _mockCacheKeyGenerator = new Mock<ICacheKeyGenerator>();
         _mockLogger = new Mock<ILogger<TechnicalIndicatorService>>();
+
+        var mockStockPriceRepo = new Mock<IRepository<StockPrice>>();
+        mockStockPriceRepo
+            .Setup(x => x.FindAsync(It.IsAny<System.Linq.Expressions.Expression<System.Func<StockPrice, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<StockPrice>());
+        _mockUnitOfWork
+            .Setup(x => x.Repository<StockPrice>())
+            .Returns(mockStockPriceRepo.Object);
+
         _mockCacheService
             .Setup(x => x.GetAsync<CachedDecimal>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((CachedDecimal?)null);
@@ -36,6 +47,7 @@ public class TechnicalIndicatorServiceTests
             .Returns((string symbol, DateTime start, DateTime end) => $"ohlcv:{symbol}:{start:yyyyMMdd}:{end:yyyyMMdd}");
         _service = new TechnicalIndicatorService(
             _mockVnStockService.Object,
+            _mockUnitOfWork.Object,
             _mockCacheService.Object,
             _mockCacheKeyGenerator.Object,
             _mockLogger.Object);

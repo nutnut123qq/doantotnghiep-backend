@@ -680,6 +680,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddBackgroundJobs(this IServiceCollection services)
     {
         services.AddHostedService<Infrastructure.BackgroundJobs.StockPriceUpdateJob>();
+        services.AddHostedService<Infrastructure.BackgroundJobs.StockHistorySyncJob>();
         services.AddHostedService<Infrastructure.BackgroundJobs.AlertMonitorJob>();
         services.AddHostedService<Infrastructure.BackgroundJobs.TechnicalIndicatorCalculationJob>();
         services.AddHostedService<Infrastructure.BackgroundJobs.NewsCrawlerJob>();

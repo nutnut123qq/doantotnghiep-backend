@@ -9,6 +9,7 @@ namespace StockInvestment.Infrastructure.Services;
 public class TechnicalIndicatorService : ITechnicalIndicatorService
 {
     private readonly IVNStockService _vnStockService;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ICacheService _cacheService;
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
     private readonly ILogger<TechnicalIndicatorService> _logger;
@@ -18,11 +19,13 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
 
     public TechnicalIndicatorService(
         IVNStockService vnStockService,
+        IUnitOfWork unitOfWork,
         ICacheService cacheService,
         ICacheKeyGenerator cacheKeyGenerator,
         ILogger<TechnicalIndicatorService> logger)
     {
         _vnStockService = vnStockService;
+        _unitOfWork = unitOfWork;
         _cacheService = cacheService;
         _cacheKeyGenerator = cacheKeyGenerator;
         _logger = logger;
@@ -365,9 +368,71 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
             return cached;
         }
 
-        var data = (await _vnStockService.GetHistoricalDataAsync(symbol, startDate, endDate))
-            .OrderBy(d => d.Date)
+        var normalizedSymbol = symbol.ToUpperInvariant();
+
+        // 1. Try database first
+        var dbPrices = (await _unitOfWork.Repository<StockPrice>()
+            .FindAsync(
+                sp => sp.Symbol == normalizedSymbol && sp.Date >= startDate && sp.Date <= endDate))
+            .OrderBy(sp => sp.Date)
             .ToList();
+
+        List<OHLCVData> data;
+        if (dbPrices.Count > 0)
+        {
+            data = dbPrices.Select(sp => new OHLCVData
+            {
+                Date = sp.Date,
+                Open = sp.Open,
+                High = sp.High,
+                Low = sp.Low,
+                Close = sp.Close,
+                Volume = sp.Volume
+            }).ToList();
+
+            _logger.LogDebug(
+                "Historical data for {Symbol} served from DB ({Count} rows)",
+                normalizedSymbol, data.Count);
+        }
+        else
+        {
+            // 2. Fallback to external API and persist to DB
+            data = (await _vnStockService.GetHistoricalDataAsync(symbol, startDate, endDate))
+                .OrderBy(d => d.Date)
+                .ToList();
+
+            if (data.Count > 0)
+            {
+                var entities = data.Select(d => new StockPrice
+                {
+                    Symbol = normalizedSymbol,
+                    Date = d.Date.Date,
+                    Open = d.Open,
+                    High = d.High,
+                    Low = d.Low,
+                    Close = d.Close,
+                    Volume = d.Volume,
+                    UpdatedAt = DateTime.UtcNow
+                }).ToList();
+
+                try
+                {
+                    await _unitOfWork.Repository<StockPrice>().AddRangeAsync(entities);
+                    await _unitOfWork.SaveChangesAsync();
+                    _logger.LogInformation(
+                        "Persisted {Count} historical price rows for {Symbol} to DB",
+                        entities.Count, normalizedSymbol);
+                }
+                catch (Exception ex)
+                {
+                    // Non-fatal: still return data even if persistence fails
+                    _logger.LogWarning(ex,
+                        "Failed to persist historical prices for {Symbol} to DB; returning data anyway",
+                        normalizedSymbol);
+                }
+            }
+        }
+
         await _cacheService.SetAsync(cacheKey, data, HistoricalDataCacheTtl);
 
         var apiCacheKey = _cacheKeyGenerator.GenerateOHLCVKey(symbol, startDate, endDate);

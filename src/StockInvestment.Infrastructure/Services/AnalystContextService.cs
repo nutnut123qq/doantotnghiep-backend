@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Constants;
+using StockInvestment.Domain.Entities;
 
 namespace StockInvestment.Infrastructure.Services;
 
@@ -11,17 +12,20 @@ public class AnalystContextService : IAnalystContextService
     private readonly INewsService _newsService;
     private readonly IVNStockService _vnStockService;
     private readonly ITechnicalDataService _technicalDataService;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AnalystContextService> _logger;
 
     public AnalystContextService(
         INewsService newsService,
         IVNStockService vnStockService,
         ITechnicalDataService technicalDataService,
+        IUnitOfWork unitOfWork,
         ILogger<AnalystContextService> logger)
     {
         _newsService = newsService;
         _vnStockService = vnStockService;
         _technicalDataService = technicalDataService;
+        _unitOfWork = unitOfWork;
         _logger = logger;
     }
 

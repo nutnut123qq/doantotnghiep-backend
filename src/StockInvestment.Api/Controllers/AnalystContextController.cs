@@ -25,13 +25,6 @@ public class AnalystContextController : ControllerBase
         _analystContext = analystContext;
         _options = options.Value;
         _logger = logger;
-
-        if (string.IsNullOrWhiteSpace(_options.ApiKey))
-        {
-            throw new InvalidOperationException(
-                "AnalystContext:ApiKey must be configured in appsettings.json. " +
-                "Set to a non-empty value or disable the endpoint.");
-        }
     }
 
     private bool TryValidateInternalKey()

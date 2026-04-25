@@ -7,7 +7,7 @@ namespace StockInvestment.Infrastructure.Services;
 /// </summary>
 public class CacheKeyGenerator : StockInvestment.Application.Interfaces.ICacheKeyGenerator
 {
-    private const string CacheVersion = "v2";
+    private const string CacheVersion = "v3";
     private const string InsightsPrefix = "insights";
     private const string MarketSentimentPrefix = "market_sentiment";
     private const string OHLCVPrefix = "ohlcv";

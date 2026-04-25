@@ -261,7 +261,7 @@ public class ForecastController : ControllerBase
             Symbol = symbol,
             TimeHorizon = timeHorizon,
         };
-        await _cacheService.SetAsync($"forecast_job:{jobId}", jobState, TimeSpan.FromHours(1));
+        await _cacheService.SetAsync($"forecast_job:v3:{jobId}", jobState, TimeSpan.FromHours(1));
 
         _ = Task.Run(async () =>
         {
@@ -286,7 +286,7 @@ public class ForecastController : ControllerBase
 
                     jobState.Status = "completed";
                     jobState.Result = forecast;
-                    await cache.SetAsync($"forecast_job:{jobId}", jobState, TimeSpan.FromHours(8));
+                    await cache.SetAsync($"forecast_job:v3:{jobId}", jobState, TimeSpan.FromHours(8));
 
                     logger.LogInformation(
                         "Background LangGraph analysis completed for {Symbol} job={JobId}",
@@ -297,7 +297,7 @@ public class ForecastController : ControllerBase
                 {
                     jobState.Status = "failed";
                     jobState.Error = "AI service returned empty analysis";
-                    await cache.SetAsync($"forecast_job:{jobId}", jobState, TimeSpan.FromHours(1));
+                    await cache.SetAsync($"forecast_job:v3:{jobId}", jobState, TimeSpan.FromHours(1));
 
                     logger.LogWarning(
                         "Background LangGraph analysis returned empty for {Symbol} job={JobId}",
@@ -315,7 +315,7 @@ public class ForecastController : ControllerBase
 
                     jobState.Status = "failed";
                     jobState.Error = ex.Message;
-                    await cache.SetAsync($"forecast_job:{jobId}", jobState, TimeSpan.FromHours(1));
+                    await cache.SetAsync($"forecast_job:v3:{jobId}", jobState, TimeSpan.FromHours(1));
 
                     logger.LogError(
                         ex,
@@ -372,7 +372,7 @@ public class ForecastController : ControllerBase
         var cacheKey = _cacheKeyGenerator.GenerateLangGraphForecastKey(symbol, timeHorizon);
 
         // 1. Check our inline background-job state first (no external RQ worker needed).
-        var jobState = await _cacheService.GetAsync<LangGraphJobState>($"forecast_job:{jobId}");
+        var jobState = await _cacheService.GetAsync<LangGraphJobState>($"forecast_job:v3:{jobId}");
         if (jobState != null && !string.IsNullOrWhiteSpace(jobState.Status))
         {
             var stateStatus = jobState.Status.ToLowerInvariant();

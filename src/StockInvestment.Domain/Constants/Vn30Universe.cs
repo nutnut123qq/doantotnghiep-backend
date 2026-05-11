@@ -7,9 +7,9 @@ public static class Vn30Universe
 {
     private static readonly string[] SymbolsOrdered =
     {
-        "VIC", "VNM", "VCB", "VRE", "VHM", "GAS", "MSN", "BID", "CTG", "HPG",
-        "TCB", "MBB", "VPB", "PLX", "SAB", "VJC", "GVR", "FPT", "POW", "SSI",
-        "MWG", "HDB", "ACB", "TPB", "STB", "PDR", "VIB", "BCM", "KDH", "NVL"
+        "ACB", "BID", "CTG", "DGC", "FPT", "GAS", "GVR", "HDB", "HPG", "LPB",
+        "MBB", "MSN", "MWG", "PLX", "SAB", "SHB", "SSB", "SSI", "STB", "TCB",
+        "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VPL", "VRE"
     };
 
     private static readonly HashSet<string> SymbolSet = new(SymbolsOrdered, StringComparer.OrdinalIgnoreCase);

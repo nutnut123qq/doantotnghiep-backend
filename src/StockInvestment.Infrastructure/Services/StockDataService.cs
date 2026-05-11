@@ -302,7 +302,7 @@ public class StockDataService : IStockDataService
         var random = new Random();
         var tickers = new List<StockTicker>();
 
-        var symbols = new[] { "VIC", "VNM", "VCB", "VRE", "VHM", "VGC", "VSH", "VCI", "VHC", "VND" };
+        var symbols = new[] { "VCB", "VHM", "VIC", "FPT", "HPG", "GAS", "BID", "CTG", "TCB", "MBB" };
         var industries = new[] { "Banking", "Retail", "Technology", "Real Estate", "Manufacturing" };
 
         foreach (var symbol in symbols)

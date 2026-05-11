@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using NCrontab;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Infrastructure.Configuration;
 using StockInvestment.Infrastructure.Data;
@@ -20,6 +21,7 @@ public class AIInsightGenerationJob : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly AIInsightGenerationOptions _options;
     private TimeSpan _generationInterval;
+    private bool _isWarmup;
 
     public AIInsightGenerationJob(
         ILogger<AIInsightGenerationJob> logger,
@@ -61,20 +63,50 @@ public class AIInsightGenerationJob : BackgroundService
         {
             try
             {
-                await GenerateInsightsAsync(stoppingToken);
+                _isWarmup = await GenerateInsightsAsync(stoppingToken);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error generating AI insights");
             }
 
-            await Task.Delay(_generationInterval, stoppingToken);
+            var delay = GetDelayUntilNextRun(_isWarmup);
+            _logger.LogInformation(
+                "AI Insight next run scheduled at {NextRun:yyyy-MM-dd HH:mm:ss} (delay {DelayMinutes}m). Warmup={Warmup}.",
+                DateTime.Now.Add(delay),
+                (int)delay.TotalMinutes,
+                _isWarmup);
+            await Task.Delay(delay, stoppingToken);
         }
 
         _logger.LogInformation("AI Insight Generation Job stopped");
     }
 
-    private async Task GenerateInsightsAsync(CancellationToken cancellationToken)
+    private TimeSpan GetDelayUntilNextRun(bool isWarmup)
+    {
+        // Warmup mode always uses short interval (not cron)
+        if (isWarmup)
+        {
+            return TimeSpan.FromMinutes(Math.Max(15, _options.WarmupIntervalMinutes));
+        }
+
+        // Steady-state: prefer cron expression over fixed interval
+        if (!string.IsNullOrWhiteSpace(_options.CronExpression))
+        {
+            var schedule = CrontabSchedule.TryParse(_options.CronExpression);
+            if (schedule != null)
+            {
+                var now = DateTime.Now; // local server time
+                var nextOccurrence = schedule.GetNextOccurrence(now);
+                return nextOccurrence - now;
+            }
+        }
+
+        // Fallback to fixed interval
+        return TimeSpan.FromMinutes(Math.Max(15, _options.IntervalMinutes));
+    }
+
+    private async Task<bool> GenerateInsightsAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceProvider.CreateScope();
 
@@ -92,7 +124,7 @@ public class AIInsightGenerationJob : BackgroundService
 
         if (distributedLock == null)
         {
-            return;
+            return false;
         }
 
         using var lockHandle = distributedLock;
@@ -100,6 +132,7 @@ public class AIInsightGenerationJob : BackgroundService
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var insightService = scope.ServiceProvider.GetRequiredService<IAIInsightService>();
 
+        bool isWarmup = false;
         try
         {
             // Coverage metric: number of symbols currently present in active global feed.
@@ -110,7 +143,7 @@ public class AIInsightGenerationJob : BackgroundService
                 .CountAsync(cancellationToken);
 
             var targetCoverage = Math.Max(5, _options.ScheduledTopSymbols);
-            var isWarmup = _options.EnableWarmupProfile && coverageCount < targetCoverage;
+            isWarmup = _options.EnableWarmupProfile && coverageCount < targetCoverage;
             var effectiveMaxGenerate = isWarmup
                 ? Math.Max(_options.MaxGeneratePerRun, _options.WarmupMaxGeneratePerRun)
                 : _options.MaxGeneratePerRun;
@@ -137,11 +170,11 @@ public class AIInsightGenerationJob : BackgroundService
                 effectiveTtl,
                 cancellationToken);
             _logger.LogInformation(
-                "Hybrid insight generation completed. generated={GeneratedCount}, effectiveMaxGenerate={EffectiveMaxGenerate}, effectiveTtlMinutes={EffectiveTtlMinutes}, nextIntervalMinutes={NextIntervalMinutes}",
+                "Hybrid insight generation completed. generated={GeneratedCount}, effectiveMaxGenerate={EffectiveMaxGenerate}, effectiveTtlMinutes={EffectiveTtlMinutes}, scheduleMode={ScheduleMode}",
                 generatedCount,
                 effectiveMaxGenerate,
                 (int)effectiveTtl.TotalMinutes,
-                (int)_generationInterval.TotalMinutes);
+                !string.IsNullOrWhiteSpace(_options.CronExpression) ? "cron" : "interval");
 
             // Cleanup old dismissed insights
             await insightService.CleanupOldDismissedInsightsAsync(7, cancellationToken);
@@ -150,6 +183,8 @@ public class AIInsightGenerationJob : BackgroundService
         {
             _logger.LogError(ex, "Error in GenerateInsightsAsync");
         }
+
+        return isWarmup;
     }
 
     private async Task<List<Guid>> GetCoveragePriorityTickerIdsAsync(

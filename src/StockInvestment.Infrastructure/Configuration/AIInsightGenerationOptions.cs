@@ -7,7 +7,8 @@ public class AIInsightGenerationOptions
     /// <summary>When false, the hosted insight job idles (no outbound AI insight generation).</summary>
     public bool Enabled { get; set; } = true;
 
-    // Steady-state profile (balanced, 2-4h freshness)
+    // Steady-state profile (daily cron preferred; IntervalMinutes is fallback when CronExpression is empty/invalid)
+    public string? CronExpression { get; set; } = "0 7 * * *";
     public int IntervalMinutes { get; set; } = 120;
     public int StartupDelayMinutes { get; set; } = 5;
     public int ScheduledTopSymbols { get; set; } = 30;

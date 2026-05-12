@@ -21,6 +21,7 @@ public class AIInsightService : IAIInsightService
     private readonly IAIService _aiService;
     private readonly ITechnicalDataService _technicalDataService;
     private readonly INewsService _newsService;
+    private readonly IFinancialReportService _financialReportService;
     private readonly ILogger<AIInsightService> _logger;
     private readonly AIInsightGenerationOptions _generationOptions;
 
@@ -34,6 +35,7 @@ public class AIInsightService : IAIInsightService
         IAIService aiService,
         ITechnicalDataService technicalDataService,
         INewsService newsService,
+        IFinancialReportService financialReportService,
         ILogger<AIInsightService> logger,
         IOptions<AIInsightGenerationOptions> generationOptions)
     {
@@ -44,6 +46,7 @@ public class AIInsightService : IAIInsightService
         _aiService = aiService;
         _technicalDataService = technicalDataService;
         _newsService = newsService;
+        _financialReportService = financialReportService;
         _logger = logger;
         _generationOptions = generationOptions.Value;
     }
@@ -90,7 +93,34 @@ public class AIInsightService : IAIInsightService
                 technicalData["volume"] = ticker.Volume?.ToString() ?? "N/A";
             }
 
-            // Collect news sentiment if not provided
+            // Collect fundamental data if not provided
+            if (fundamentalData == null)
+            {
+                var snapshot = await _financialReportService.GetLatestFinancialSnapshotAsync(ticker.Symbol);
+                fundamentalData = new Dictionary<string, string>();
+                if (snapshot != null)
+                {
+                    fundamentalData["roe"] = snapshot.Roe?.ToString("F2") ?? "N/A";
+                    fundamentalData["eps"] = snapshot.Eps?.ToString("F2") ?? "N/A";
+                    fundamentalData["pe"] = snapshot.Pe?.ToString("F2") ?? "N/A";
+                    fundamentalData["revenue"] = snapshot.Revenue?.ToString("N0") ?? "N/A";
+                    fundamentalData["net_profit"] = snapshot.NetProfit?.ToString("N0") ?? "N/A";
+                    fundamentalData["debt_to_equity"] = snapshot.DebtToEquity?.ToString("F2") ?? "N/A";
+                    fundamentalData["period"] = snapshot.Period ?? "N/A";
+                }
+                else
+                {
+                    fundamentalData["roe"] = "N/A";
+                    fundamentalData["eps"] = "N/A";
+                    fundamentalData["pe"] = "N/A";
+                    fundamentalData["revenue"] = "N/A";
+                    fundamentalData["net_profit"] = "N/A";
+                    fundamentalData["debt_to_equity"] = "N/A";
+                    fundamentalData["period"] = "N/A";
+                }
+            }
+
+            // Collect news sentiment + headlines if not provided
             if (sentimentData == null)
             {
                 var (recentNews, _) = await _newsService.GetNewsAsync(1, 10, tickerId);
@@ -114,12 +144,14 @@ public class AIInsightService : IAIInsightService
                             ? "Tiêu cực" 
                             : "Trung lập";
                     sentimentData["recent_news"] = $"Có {totalCount} tin tức gần đây";
+                    sentimentData["headlines"] = string.Join("\n", newsList.Take(5).Select(n => $"- [{n.Sentiment}] {n.Title}"));
                 }
                 else
                 {
                     sentimentData["score"] = "0";
                     sentimentData["sentiment"] = "Trung lập";
                     sentimentData["recent_news"] = "Chưa có tin tức";
+                    sentimentData["headlines"] = "Không có tin tức nào";
                 }
             }
 

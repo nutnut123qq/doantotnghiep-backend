@@ -551,7 +551,7 @@ public static class ServiceCollectionExtensions
             }
 
             client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
-            var timeoutSec = opts.TimeoutSeconds > 0 ? opts.TimeoutSeconds : 180;
+            var timeoutSec = opts.TimeoutSeconds > 0 ? opts.TimeoutSeconds : 600;
             client.Timeout = TimeSpan.FromSeconds(timeoutSec);
         })
         .AddPolicyHandler((serviceProvider, request) =>

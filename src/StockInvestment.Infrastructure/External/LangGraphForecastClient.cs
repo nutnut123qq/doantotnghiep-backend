@@ -32,7 +32,7 @@ public sealed class LangGraphForecastClient : ILangGraphForecastClient
         _logger = logger;
     }
 
-    public async Task<LangGraphAnalyzeResponse?> AnalyzeAsync(string symbol, CancellationToken cancellationToken = default)
+    public async Task<LangGraphAnalyzeResponse?> AnalyzeAsync(string symbol, string? jobId = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(symbol))
             throw new ArgumentException("Symbol is required", nameof(symbol));
@@ -40,7 +40,14 @@ public sealed class LangGraphForecastClient : ILangGraphForecastClient
         var sym = symbol.Trim().ToUpperInvariant();
         var body = new AnalyzeRequestBody(sym, string.Empty, string.Empty);
 
-        using var response = await _httpClient.PostAsJsonAsync("/api/analyze", body, PostJsonOptions, cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/analyze");
+        request.Content = JsonContent.Create(body, options: PostJsonOptions);
+        if (!string.IsNullOrWhiteSpace(jobId))
+        {
+            request.Headers.TryAddWithoutValidation("X-Forecast-Job-Id", jobId);
+        }
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         var payload = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -144,6 +151,41 @@ public sealed class LangGraphForecastClient : ILangGraphForecastClient
         {
             _logger.LogError(ex, "Failed to deserialize LangGraph job response for {JobId}", jobId);
             throw;
+        }
+    }
+
+    public async Task<LangGraphProgressResponse?> GetAnalyzeProgressAsync(string jobId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+            throw new ArgumentException("JobId is required", nameof(jobId));
+
+        using var response = await _httpClient.GetAsync($"/api/analyze/progress/{Uri.EscapeDataString(jobId)}", cancellationToken);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            _logger.LogDebug("LangGraph progress {JobId} not found (404 from Python)", jobId);
+            return null;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning(
+                "LangGraph progress returned {StatusCode} for {JobId}: {Body}",
+                (int)response.StatusCode,
+                jobId,
+                payload.Length > 500 ? payload[..500] + "…" : payload);
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<LangGraphProgressResponse>(payload, JsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Failed to deserialize LangGraph progress for {JobId}", jobId);
+            return null;
         }
     }
 

@@ -76,4 +76,56 @@ public sealed class MockAIService : IAIService
 
     public Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default)
         => Task.FromResult(new InsightResult { Symbol = symbol, Type = "Hold", Title = "", Description = "" });
+
+    public Task<List<VNStockNewsItem>> GetNewsFromVNStockAsync(string symbol, int limit = 20, CancellationToken cancellationToken = default)
+    {
+        if (symbol.Equals("ERR429", StringComparison.OrdinalIgnoreCase))
+        {
+            throw BuildHttpException(429, "Quota exceeded");
+        }
+
+        if (symbol.Equals("ERR500", StringComparison.OrdinalIgnoreCase))
+        {
+            throw BuildHttpException(500, "Internal AI service error");
+        }
+
+        return Task.FromResult(new List<VNStockNewsItem>
+        {
+            new VNStockNewsItem
+            {
+                Symbol = symbol,
+                Title = $"{symbol} test news",
+                PublishedAt = DateTime.UtcNow.ToString("O"),
+                Url = $"https://cafef.vn/{symbol.ToLower()}-test-news.htm",
+                Source = "CafeF",
+                Summary = "Test summary"
+            }
+        });
+    }
+
+    public Task<List<VNStockEventItem>> GetEventsFromVNStockAsync(string symbol, int limit = 20, CancellationToken cancellationToken = default)
+    {
+        if (symbol.Equals("ERR429", StringComparison.OrdinalIgnoreCase))
+        {
+            throw BuildHttpException(429, "Quota exceeded");
+        }
+
+        if (symbol.Equals("ERR500", StringComparison.OrdinalIgnoreCase))
+        {
+            throw BuildHttpException(500, "Internal AI service error");
+        }
+
+        return Task.FromResult(new List<VNStockEventItem>
+        {
+            new VNStockEventItem
+            {
+                Symbol = symbol,
+                Title = $"{symbol} ĐHCĐ thường niên",
+                EventType = "AGM",
+                EventDate = DateTime.UtcNow.AddDays(30).ToString("O"),
+                Description = "Test event description",
+                Status = "Upcoming"
+            }
+        });
+    }
 }

@@ -11,7 +11,7 @@ public interface ILangGraphForecastClient
     /// Legacy synchronous call — invokes <c>POST /api/analyze</c> and blocks until the graph finishes.
     /// Kept for backward compatibility; prefer the enqueue/poll pair below for dashboard flows.
     /// </summary>
-    Task<LangGraphAnalyzeResponse?> AnalyzeAsync(string symbol, CancellationToken cancellationToken = default);
+    Task<LangGraphAnalyzeResponse?> AnalyzeAsync(string symbol, string? jobId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Enqueue an analyse job on the Python RQ worker.
@@ -24,4 +24,10 @@ public interface ILangGraphForecastClient
     /// Returns null when Python responds 404 (job expired / unknown id).
     /// </summary>
     Task<LangGraphJobResponse?> GetAnalyzeJobAsync(string jobId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fetch the thinking steps (progress) for a running or completed analyse job.
+    /// Returns null when Python responds 404.
+    /// </summary>
+    Task<LangGraphProgressResponse?> GetAnalyzeProgressAsync(string jobId, CancellationToken cancellationToken = default);
 }

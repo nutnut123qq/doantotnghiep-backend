@@ -33,6 +33,8 @@ public interface IAIService
         object metadata,
         CancellationToken cancellationToken = default);
     Task<InsightResult> GenerateInsightAsync(string symbol, Dictionary<string, string>? technicalData, Dictionary<string, string>? fundamentalData, Dictionary<string, string>? sentimentData, CancellationToken cancellationToken = default);
+
+
 }
 
 public class ForecastResult

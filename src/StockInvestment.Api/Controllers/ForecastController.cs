@@ -278,7 +278,7 @@ public class ForecastController : ControllerBase
                     symbol,
                     jobId);
 
-                var response = await client.AnalyzeAsync(symbol, CancellationToken.None);
+                var response = await client.AnalyzeAsync(symbol, jobId, CancellationToken.None);
                 if (response != null)
                 {
                     var forecast = mapper.Map(response, symbol, timeHorizon);
@@ -431,6 +431,34 @@ public class ForecastController : ControllerBase
             message = "Job phân tích LangGraph không còn tồn tại. Vui lòng bấm Thử lại để tạo lần mới.",
             jobId
         });
+    }
+
+    /// <summary>
+    /// Poll the thinking steps (progress) of a running LangGraph forecast job.
+    /// Proxies to the Python AI service progress endpoint.
+    /// </summary>
+    [HttpGet("langgraph/jobs/{jobId}/progress")]
+    public async Task<IActionResult> GetLangGraphJobProgress(string jobId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            return BadRequest(new { error = "jobId is required" });
+        }
+
+        try
+        {
+            var progress = await _langGraphForecastClient.GetAnalyzeProgressAsync(jobId, cancellationToken);
+            if (progress == null)
+            {
+                return Ok(new { jobId, steps = new List<object>() });
+            }
+            return Ok(progress);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch LangGraph progress for {JobId}", jobId);
+            return Ok(new { jobId, steps = new List<object>() });
+        }
     }
 
     private string GetRSILabel(decimal rsi)

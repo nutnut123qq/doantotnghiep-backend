@@ -552,6 +552,13 @@ public static class ServiceCollectionExtensions
 
             client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
             var timeoutSec = opts.TimeoutSeconds > 0 ? opts.TimeoutSeconds : 600;
+            if (timeoutSec < 300)
+            {
+                var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
+                var logger = loggerFactory?.CreateLogger("LangGraphForecastClient");
+                logger?.LogWarning("StockAnalyst:TimeoutSeconds was configured to {Configured}s; raising to minimum 300s.", timeoutSec);
+                timeoutSec = 300;
+            }
             client.Timeout = TimeSpan.FromSeconds(timeoutSec);
         })
         .AddPolicyHandler((serviceProvider, request) =>

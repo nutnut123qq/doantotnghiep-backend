@@ -40,7 +40,46 @@ public static class CorporateEventTextHelper
             lowerText.Contains("tăng vốn", StringComparison.Ordinal))
             return CorporateEventType.RightsIssue;
 
-        return CorporateEventType.Earnings;
+        return CorporateEventType.Unknown;
+    }
+
+    /// <summary>
+    /// Attempts to extract an explicit event date from Vietnamese title/description text
+    /// (e.g. "ngày 15/05/2026", "15-05-2026", "15/05").
+    /// </summary>
+    public static DateTime? TryParseEventDateFromText(string text, DateTime? referenceYear = null)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var year = referenceYear?.Year ?? DateTime.UtcNow.Year;
+
+        // Full date: dd/MM/yyyy or dd-MM-yyyy
+        var m = Regex.Match(text, @"\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b");
+        if (m.Success
+            && int.TryParse(m.Groups[1].Value, out var d1)
+            && int.TryParse(m.Groups[2].Value, out var mo1)
+            && int.TryParse(m.Groups[3].Value, out var y1))
+        {
+            if (y1 >= 2000 && y1 <= 2100 && mo1 <= 12 && d1 <= 31)
+            {
+                try { return new DateTime(y1, mo1, d1, 0, 0, 0, DateTimeKind.Utc); } catch { }
+            }
+        }
+
+        // Partial date: dd/MM (assume current year)
+        m = Regex.Match(text, @"\b(\d{1,2})[\/\-](\d{1,2})\b");
+        if (m.Success
+            && int.TryParse(m.Groups[1].Value, out var d2)
+            && int.TryParse(m.Groups[2].Value, out var mo2))
+        {
+            if (mo2 <= 12 && d2 <= 31)
+            {
+                try { return new DateTime(year, mo2, d2, 0, 0, 0, DateTimeKind.Utc); } catch { }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -115,8 +154,15 @@ public static class CorporateEventTextHelper
         string sourceUrl,
         CorporateEventType eventType)
     {
+        if (eventType == CorporateEventType.Unknown)
+            throw new ArgumentException("Cannot create a corporate event with Unknown type.", nameof(eventType));
+
         var combined = title + " " + (description ?? "");
-        var date = eventDateUtc.Date;
+
+        // Prefer explicit event date found in title/description over RSS pubDate
+        var explicitDate = TryParseEventDateFromText(combined);
+        var date = explicitDate?.Date ?? eventDateUtc.Date;
+
         var status = date < DateTime.UtcNow.Date
             ? EventStatus.Past
             : date == DateTime.UtcNow.Date

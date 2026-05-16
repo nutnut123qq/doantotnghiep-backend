@@ -51,7 +51,7 @@ public class CorporateEventRepository : ICorporateEventRepository
         }
 
         return await query
-            .OrderBy(e => e.EventDate)
+            .OrderByDescending(e => e.EventDate)
             .ToListAsync();
     }
 

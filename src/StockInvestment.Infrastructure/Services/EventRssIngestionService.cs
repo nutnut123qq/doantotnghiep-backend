@@ -291,10 +291,17 @@ public class EventRssIngestionService : IEventRssIngestionService
                     continue;
 
                 var eventType = CorporateEventTextHelper.DetermineEventType(combined);
+                if (eventType == CorporateEventType.Unknown)
+                    continue;
+
                 var published = ParseLooseDate(timeText);
+                // Prefer explicit date from title over crawl / RSS pub date
+                var explicitDate = CorporateEventTextHelper.TryParseEventDateFromText(combined);
+                var finalDate = explicitDate ?? published;
+
                 var ev = CorporateEventTextHelper.CreateEventFromRss(
                     tickerId,
-                    published,
+                    finalDate,
                     title,
                     string.IsNullOrWhiteSpace(summary) ? null : summary,
                     link,

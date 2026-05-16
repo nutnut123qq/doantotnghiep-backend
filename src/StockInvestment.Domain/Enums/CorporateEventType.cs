@@ -6,6 +6,11 @@ namespace StockInvestment.Domain.Entities;
 public enum CorporateEventType
 {
     /// <summary>
+    /// Not a recognized corporate event
+    /// </summary>
+    Unknown = 0,
+
+    /// <summary>
     /// Earnings announcement or quarterly/annual report
     /// </summary>
     Earnings = 1,

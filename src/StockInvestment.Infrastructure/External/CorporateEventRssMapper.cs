@@ -31,6 +31,9 @@ public static class CorporateEventRssMapper
         var published = RssSyndicationUtilities.ResolvePublishedAtUtc(item);
         var eventType = CorporateEventTextHelper.DetermineEventType(combined);
 
+        if (eventType == CorporateEventType.Unknown)
+            return null;
+
         var ev = CorporateEventTextHelper.CreateEventFromRss(
             tickerId,
             published,

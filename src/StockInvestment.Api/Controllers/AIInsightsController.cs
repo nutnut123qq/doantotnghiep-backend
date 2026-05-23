@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.DTOs.AIInsights;
 using StockInvestment.Domain.Enums;
+using StockInvestment.Domain.Constants;
 using System.Security.Claims;
 
 namespace StockInvestment.Api.Controllers;
@@ -18,19 +19,22 @@ public class AIInsightsController : ControllerBase
     private readonly ICacheService _cacheService;
     private readonly IStockTickerRepository _tickerRepository;
     private readonly ICacheKeyGenerator _cacheKeyGenerator;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public AIInsightsController(
         IAIInsightService insightService,
         ILogger<AIInsightsController> logger,
         ICacheService cacheService,
         IStockTickerRepository tickerRepository,
-        ICacheKeyGenerator cacheKeyGenerator)
+        ICacheKeyGenerator cacheKeyGenerator,
+        IServiceScopeFactory scopeFactory)
     {
         _insightService = insightService;
         _logger = logger;
         _cacheService = cacheService;
         _tickerRepository = tickerRepository;
         _cacheKeyGenerator = cacheKeyGenerator;
+        _scopeFactory = scopeFactory;
     }
 
     /// <summary>
@@ -259,6 +263,65 @@ public class AIInsightsController : ControllerBase
                 details = "Có thể do: AI service không chạy, lỗi kết nối, hoặc lỗi xử lý dữ liệu"
             });
         }
+    }
+
+    /// <summary>
+    /// Manually trigger insight generation for multiple tickers (defaults to VN30 universe).
+    /// Runs in a background task and returns 202 Accepted immediately.
+    /// </summary>
+    [HttpPost("generate/batch")]
+    [Authorize(Policy = "Admin")]
+    public async Task<IActionResult> GenerateInsightsBatch([FromBody] GenerateInsightsBatchRequest request)
+    {
+        var symbols = request.Symbols?.Count > 0
+            ? request.Symbols
+            : Vn30Universe.Symbols.ToList();
+
+        var tickers = await _tickerRepository.GetAllAsync();
+        var tickerIds = tickers
+            .Where(t => symbols.Contains(t.Symbol, StringComparer.OrdinalIgnoreCase))
+            .Select(t => t.Id)
+            .ToList();
+
+        if (tickerIds.Count == 0)
+        {
+            return BadRequest(new { error = "No valid tickers found for the given symbols" });
+        }
+
+        var jobId = Guid.NewGuid().ToString("N");
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var service = scope.ServiceProvider.GetRequiredService<IAIInsightService>();
+                var logger = scope.ServiceProvider.GetRequiredService<ILogger<AIInsightsController>>();
+
+                logger.LogInformation(
+                    "Background AI insight batch generation started for {Count} tickers (job={JobId})",
+                    tickerIds.Count,
+                    jobId);
+
+                await service.GenerateInsightsBatchAsync(tickerIds, CancellationToken.None);
+
+                logger.LogInformation(
+                    "Background AI insight batch generation completed (job={JobId})",
+                    jobId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Background AI insight batch generation failed (job={JobId})", jobId);
+            }
+        }, CancellationToken.None);
+
+        return StatusCode(202, new
+        {
+            status = "running",
+            jobId,
+            count = tickerIds.Count,
+            symbols = symbols.Select(s => s.ToUpperInvariant()).ToList()
+        });
     }
 
     [HttpGet("metrics/accuracy")]

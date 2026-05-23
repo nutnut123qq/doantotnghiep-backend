@@ -155,6 +155,7 @@ public class FinancialReportCrawlerService : IFinancialReportCrawlerService
                 MinItemsBeforeFallback = _options.MinReportsBeforeFallback,
                 FallbackSources =
                 [
+                    new NewsSourceConfig { Name = "AIService-Vnstock", Kind = "AIService", Priority = 15, MaxItems = _options.MaxReportsPerSymbol },
                     new NewsSourceConfig { Name = "VietStock-HTML", Kind = "HtmlBuiltin", HtmlTemplate = "VietStock", Priority = 20, MaxItems = 5 },
                     new NewsSourceConfig { Name = "CafeF-HTML", Kind = "HtmlBuiltin", HtmlTemplate = "CafeF", Priority = 30, MaxItems = 5 }
                 ]
@@ -194,8 +195,11 @@ public class FinancialReportCrawlerService : IFinancialReportCrawlerService
         }
 
         var aggregate = new List<FinancialReport>(fetched);
-        foreach (var fallback in source.FallbackSources.Where(s => s.Enabled).OrderBy(s => s.Priority))
+        var enabledFallbacks = source.FallbackSources.Where(s => s.Enabled).OrderBy(s => s.Priority).ToList();
+        _logger.LogInformation("Attempting {Count} fallback sources for {SourceName}", enabledFallbacks.Count, source.Name);
+        foreach (var fallback in enabledFallbacks)
         {
+            _logger.LogInformation("Trying fallback {FallbackName} ({FallbackKind}) for {Symbol}", fallback.Name, fallback.Kind, symbol);
             var nestedVisited = new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase);
             var fallbackItems = await CrawlSourceWithFallbackAsync(
                 fallback,
@@ -237,6 +241,11 @@ public class FinancialReportCrawlerService : IFinancialReportCrawlerService
             {
                 return await CrawlFromCafeFAsync(symbol, maxReports);
             }
+        }
+
+        if (kind.Equals("AIService", StringComparison.OrdinalIgnoreCase))
+        {
+            return await CrawlFromAIServiceAsync(symbol, maxReports);
         }
 
         _logger.LogWarning("Unknown financial source kind {Kind} for {SourceName}.", source.Kind, source.Name);
@@ -390,6 +399,113 @@ public class FinancialReportCrawlerService : IFinancialReportCrawlerService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error crawling VietCap for {Symbol}", symbol);
+        }
+
+        return reports;
+    }
+
+    private async Task<List<FinancialReport>> CrawlFromAIServiceAsync(string symbol, int maxReports)
+    {
+        var reports = new List<FinancialReport>();
+        var upper = symbol.Trim().ToUpperInvariant();
+        if (upper.Length == 0 || maxReports <= 0)
+            return reports;
+
+        _logger.LogInformation("Crawling AI service for {Symbol} (max={MaxReports})", upper, maxReports);
+
+        try
+        {
+            var aiClient = _httpClientFactory.CreateClient("AIService");
+            var response = await aiClient.GetAsync($"/financial/vnstock/{upper}?limit={maxReports}");
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "AI service financial history request failed for {Symbol}: {Status}",
+                    upper,
+                    (int)response.StatusCode);
+                return reports;
+            }
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("reports", out var reportsArr) ||
+                reportsArr.ValueKind != JsonValueKind.Array)
+            {
+                _logger.LogWarning("AI service: no reports array for {Symbol}", upper);
+                return reports;
+            }
+
+            foreach (var item in reportsArr.EnumerateArray())
+            {
+                if (reports.Count >= maxReports)
+                    break;
+
+                var period = item.GetProperty("period").GetString() ?? "N/A";
+                var year = DateTime.Now.Year;
+                int? quarter = null;
+
+                // Parse period like "2026-Q1"
+                if (period.Contains("-Q"))
+                {
+                    var parts = period.Split("-Q");
+                    if (parts.Length == 2 &&
+                        int.TryParse(parts[0], out var y) &&
+                        int.TryParse(parts[1], out var q))
+                    {
+                        year = y;
+                        quarter = q;
+                    }
+                }
+
+                var revenue = ReadNullableDecimal(item, "revenue");
+                var grossProfit = ReadNullableDecimal(item, "gross_profit");
+                var operatingProfit = ReadNullableDecimal(item, "operating_profit");
+                var netProfit = ReadNullableDecimal(item, "net_profit");
+                var eps = ReadNullableDecimal(item, "eps");
+                var roe = ReadNullableDecimal(item, "roe");
+                var roa = ReadNullableDecimal(item, "roa");
+                var equity = ReadNullableDecimal(item, "equity");
+                var totalAssets = ReadNullableDecimal(item, "total_assets");
+
+                var content = JsonSerializer.Serialize(
+                    new Dictionary<string, object?>
+                    {
+                        ["Source"] = "vnstock_data",
+                        ["Revenue"] = revenue,
+                        ["GrossProfit"] = grossProfit,
+                        ["OperatingProfit"] = operatingProfit,
+                        ["NetProfit"] = netProfit,
+                        ["EPS"] = eps,
+                        ["ROE"] = roe,
+                        ["ROA"] = roa,
+                        ["Equity"] = equity,
+                        ["TotalAssets"] = totalAssets,
+                        ["Year"] = year,
+                        ["Quarter"] = quarter
+                    },
+                    JsonWriteOptions);
+
+                var reportDate = quarter.HasValue
+                    ? new DateTime(year, quarter.Value * 3, 1, 0, 0, 0, DateTimeKind.Utc)
+                    : new DateTime(year, 12, 31, 0, 0, 0, DateTimeKind.Utc);
+
+                reports.Add(new FinancialReport
+                {
+                    ReportType = quarter.HasValue ? "Quarterly" : "Annual",
+                    Year = year,
+                    Quarter = quarter,
+                    Content = content,
+                    ReportDate = reportDate,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            if (reports.Count > 0)
+                _logger.LogInformation("Crawled {Count} reports from AI service for {Symbol}", reports.Count, upper);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error crawling AI service for {Symbol}", symbol);
         }
 
         return reports;

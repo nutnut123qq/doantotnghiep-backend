@@ -17,4 +17,5 @@ public class FinancialReportApiTests : IClassFixture<CustomWebApplicationFactory
     [Fact]
     public async Task GetBySymbol_WithAuth_ReturnsOkOrNotFound()
         => Assert.True((await _factory.CreateAuthenticatedClient().GetAsync("api/FinancialReport/symbol/VNM")).StatusCode is HttpStatusCode.OK or HttpStatusCode.NotFound);
+
 }

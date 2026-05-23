@@ -214,7 +214,7 @@ public class AIInsightService : IAIInsightService
                 existingInsight.Reasoning = reasoningJson;
                 existingInsight.TargetPrice = aiResult.TargetPrice;
                 existingInsight.StopLoss = aiResult.StopLoss;
-                existingInsight.GeneratedAt = aiResult.GeneratedAt;
+                existingInsight.GeneratedAt = DateTime.SpecifyKind(aiResult.GeneratedAt, DateTimeKind.Utc);
                 existingInsight.UpdatedAt = DateTime.UtcNow;
                 existingInsight.IsDeleted = false;
                 existingInsight.DismissedAt = null;
@@ -241,7 +241,7 @@ public class AIInsightService : IAIInsightService
                     Reasoning = reasoningJson,
                     TargetPrice = aiResult.TargetPrice,
                     StopLoss = aiResult.StopLoss,
-                    GeneratedAt = aiResult.GeneratedAt,
+                    GeneratedAt = DateTime.SpecifyKind(aiResult.GeneratedAt, DateTimeKind.Utc),
                     Ticker = ticker // Set navigation property
                 };
 

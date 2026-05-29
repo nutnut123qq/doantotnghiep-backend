@@ -70,10 +70,12 @@ public class AIInsightGenerationJob : BackgroundService
                 _logger.LogError(ex, "Error generating AI insights");
             }
 
-            var delay = GetDelayUntilNextRun(_isWarmup);
+            var (delay, nextRunLocal, scheduleMode) = GetDelayUntilNextRun(_isWarmup);
             _logger.LogInformation(
-                "AI Insight next run scheduled at {NextRun:yyyy-MM-dd HH:mm:ss} (delay {DelayMinutes}m). Warmup={Warmup}.",
-                DateTime.Now.Add(delay),
+                "AI Insight next run scheduled at {NextRun:yyyy-MM-dd HH:mm:ss} ({TimeZoneId}, mode={ScheduleMode}, delay {DelayMinutes}m). Warmup={Warmup}.",
+                nextRunLocal,
+                _options.CronTimeZoneId,
+                scheduleMode,
                 (int)delay.TotalMinutes,
                 _isWarmup);
             await Task.Delay(delay, stoppingToken);
@@ -82,12 +84,13 @@ public class AIInsightGenerationJob : BackgroundService
         _logger.LogInformation("AI Insight Generation Job stopped");
     }
 
-    private TimeSpan GetDelayUntilNextRun(bool isWarmup)
+    private (TimeSpan Delay, DateTime NextRunLocal, string ScheduleMode) GetDelayUntilNextRun(bool isWarmup)
     {
         // Warmup mode always uses short interval (not cron)
         if (isWarmup)
         {
-            return TimeSpan.FromMinutes(Math.Max(15, _options.WarmupIntervalMinutes));
+            var warmupDelay = TimeSpan.FromMinutes(Math.Max(15, _options.WarmupIntervalMinutes));
+            return (warmupDelay, DateTime.UtcNow.Add(warmupDelay), "warmup-interval");
         }
 
         // Steady-state: prefer cron expression over fixed interval
@@ -96,14 +99,58 @@ public class AIInsightGenerationJob : BackgroundService
             var schedule = CrontabSchedule.TryParse(_options.CronExpression);
             if (schedule != null)
             {
-                var now = DateTime.Now; // local server time
-                var nextOccurrence = schedule.GetNextOccurrence(now);
-                return nextOccurrence - now;
+                var (nowInCronZone, timeZone) = GetCronZoneNow();
+                var nextOccurrence = schedule.GetNextOccurrence(nowInCronZone);
+                var nextUtc = TimeZoneInfo.ConvertTimeToUtc(
+                    DateTime.SpecifyKind(nextOccurrence, DateTimeKind.Unspecified),
+                    timeZone);
+                var delay = nextUtc - DateTime.UtcNow;
+                if (delay < TimeSpan.Zero)
+                {
+                    delay = TimeSpan.Zero;
+                }
+
+                return (delay, nextOccurrence, "cron");
             }
+
+            _logger.LogWarning(
+                "Invalid AI insight cron expression '{CronExpression}'. Falling back to IntervalMinutes={IntervalMinutes}.",
+                _options.CronExpression,
+                _options.IntervalMinutes);
         }
 
         // Fallback to fixed interval
-        return TimeSpan.FromMinutes(Math.Max(15, _options.IntervalMinutes));
+        var intervalDelay = TimeSpan.FromMinutes(Math.Max(15, _options.IntervalMinutes));
+        return (intervalDelay, DateTime.UtcNow.Add(intervalDelay), "interval");
+    }
+
+    private (DateTime NowInZone, TimeZoneInfo TimeZone) GetCronZoneNow()
+    {
+        var timeZoneId = string.IsNullOrWhiteSpace(_options.CronTimeZoneId)
+            ? "Asia/Ho_Chi_Minh"
+            : _options.CronTimeZoneId.Trim();
+
+        try
+        {
+            var timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+            return (TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timeZone), timeZone);
+        }
+        catch (TimeZoneNotFoundException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Unknown cron timezone '{TimeZoneId}'. Falling back to server local time for AI insight cron.",
+                timeZoneId);
+            return (DateTime.Now, TimeZoneInfo.Local);
+        }
+        catch (InvalidTimeZoneException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Invalid cron timezone '{TimeZoneId}'. Falling back to server local time for AI insight cron.",
+                timeZoneId);
+            return (DateTime.Now, TimeZoneInfo.Local);
+        }
     }
 
     private async Task<bool> GenerateInsightsAsync(CancellationToken cancellationToken)

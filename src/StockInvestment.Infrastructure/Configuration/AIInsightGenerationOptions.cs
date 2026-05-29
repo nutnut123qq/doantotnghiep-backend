@@ -9,6 +9,13 @@ public class AIInsightGenerationOptions
 
     // Steady-state profile (daily cron preferred; IntervalMinutes is fallback when CronExpression is empty/invalid)
     public string? CronExpression { get; set; } = "0 7 * * *";
+
+    /// <summary>
+    /// IANA timezone for <see cref="CronExpression"/> (e.g. Asia/Ho_Chi_Minh).
+    /// Cron is evaluated in this zone so 07:00 means 07:00 local Vietnam time on Docker UTC hosts.
+    /// </summary>
+    public string CronTimeZoneId { get; set; } = "Asia/Ho_Chi_Minh";
+
     public int IntervalMinutes { get; set; } = 120;
     public int StartupDelayMinutes { get; set; } = 5;
     public int ScheduledTopSymbols { get; set; } = 30;

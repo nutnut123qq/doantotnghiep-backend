@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
@@ -24,6 +25,7 @@ public class AIInsightService : IAIInsightService
     private readonly IFinancialReportService _financialReportService;
     private readonly ILogger<AIInsightService> _logger;
     private readonly AIInsightGenerationOptions _generationOptions;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     private const string RefreshQueueKey = "insight_refresh_queue";
 
@@ -37,7 +39,8 @@ public class AIInsightService : IAIInsightService
         INewsService newsService,
         IFinancialReportService financialReportService,
         ILogger<AIInsightService> logger,
-        IOptions<AIInsightGenerationOptions> generationOptions)
+        IOptions<AIInsightGenerationOptions> generationOptions,
+        IServiceScopeFactory scopeFactory)
     {
         _redis = redis;
         _unitOfWork = unitOfWork;
@@ -49,6 +52,7 @@ public class AIInsightService : IAIInsightService
         _financialReportService = financialReportService;
         _logger = logger;
         _generationOptions = generationOptions.Value;
+        _scopeFactory = scopeFactory;
     }
 
     public async Task<IEnumerable<AIInsight>> GetInsightsAsync(
@@ -262,28 +266,79 @@ public class AIInsightService : IAIInsightService
         }
     }
 
-    public async Task<IEnumerable<AIInsight>> GenerateInsightsBatchAsync(
+    public async Task<GenerateInsightsBatchResult> GenerateInsightsBatchAsync(
         IEnumerable<Guid> tickerIds,
         CancellationToken cancellationToken = default)
     {
-        var insights = new List<AIInsight>();
         var tickerIdList = tickerIds.ToList();
+        var insights = new List<AIInsight>();
+        var failedTickerIds = new List<Guid>();
 
-        foreach (var tickerId in tickerIdList)
+        for (var index = 0; index < tickerIdList.Count; index++)
         {
+            var tickerId = tickerIdList[index];
+            string symbolLabel = tickerId.ToString();
+
             try
             {
-                var insight = await GenerateInsightAsync(tickerId, null, null, null, cancellationToken);
+                using var scope = _scopeFactory.CreateScope();
+                var scopedService = scope.ServiceProvider.GetRequiredService<IAIInsightService>();
+                var tickerRepo = scope.ServiceProvider.GetRequiredService<IStockTickerRepository>();
+
+                var ticker = await tickerRepo.GetByIdAsync(tickerId, cancellationToken);
+                symbolLabel = ticker?.Symbol ?? symbolLabel;
+
+                var insight = await scopedService.GenerateInsightAsync(tickerId, null, null, null, cancellationToken);
                 insights.Add(insight);
+
+                _logger.LogInformation(
+                    "Batch insight saved for {Symbol} ({Index}/{Total})",
+                    symbolLabel,
+                    index + 1,
+                    tickerIdList.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to generate insight for ticker {TickerId}, continuing with others", tickerId);
-                // Continue with other tickers
+                failedTickerIds.Add(tickerId);
+                _logger.LogWarning(
+                    ex,
+                    "Batch insight failed for {Symbol} ({TickerId}), continuing ({Index}/{Total})",
+                    symbolLabel,
+                    tickerId,
+                    index + 1,
+                    tickerIdList.Count);
+            }
+
+            if (_generationOptions.InterTickerDelayMs > 0 && index < tickerIdList.Count - 1)
+            {
+                try
+                {
+                    await Task.Delay(_generationOptions.InterTickerDelayMs, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
         }
 
-        return insights;
+        var result = new GenerateInsightsBatchResult
+        {
+            TotalCount = tickerIdList.Count,
+            SuccessCount = insights.Count,
+            FailedCount = failedTickerIds.Count,
+            FailedTickerIds = failedTickerIds,
+            Insights = insights
+        };
+
+        _logger.LogInformation(
+            "Batch insight generation summary: total={Total}, success={Success}, failed={Failed}, failedTickerIds={FailedTickerIds}",
+            result.TotalCount,
+            result.SuccessCount,
+            result.FailedCount,
+            string.Join(",", result.FailedTickerIds));
+
+        return result;
     }
 
     public async Task<int> GenerateGlobalInsightsHybridAsync(
@@ -347,7 +402,9 @@ public class AIInsightService : IAIInsightService
 
             try
             {
-                await GenerateInsightAsync(tickerId, null, null, null, cancellationToken);
+                using var scope = _scopeFactory.CreateScope();
+                var scopedService = scope.ServiceProvider.GetRequiredService<IAIInsightService>();
+                await scopedService.GenerateInsightAsync(tickerId, null, null, null, cancellationToken);
                 generatedCount++;
                 _logger.LogInformation("Hybrid insight refresh generated for ticker {TickerId}. Reason={Reason}", tickerId, reason);
             }

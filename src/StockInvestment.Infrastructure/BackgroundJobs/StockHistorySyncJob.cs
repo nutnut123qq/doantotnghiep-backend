@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Constants;
 using StockInvestment.Domain.Entities;
+using StockInvestment.Shared;
 
 namespace StockInvestment.Infrastructure.BackgroundJobs;
 
@@ -112,7 +113,7 @@ public class StockHistorySyncJob : BackgroundService
                         .Select(d => new StockPrice
                         {
                             Symbol = normalized,
-                            Date = d.Date.Date,
+                            Date = DateTimeUtcHelper.ToUtcDate(d.Date),
                             Open = d.Open,
                             High = d.High,
                             Low = d.Low,

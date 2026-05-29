@@ -296,6 +296,8 @@ public class AIInsightsController : ControllerBase
             {
                 using var scope = _scopeFactory.CreateScope();
                 var service = scope.ServiceProvider.GetRequiredService<IAIInsightService>();
+                var cacheService = scope.ServiceProvider.GetRequiredService<ICacheService>();
+                var cacheKeyGenerator = scope.ServiceProvider.GetRequiredService<ICacheKeyGenerator>();
                 var logger = scope.ServiceProvider.GetRequiredService<ILogger<AIInsightsController>>();
 
                 logger.LogInformation(
@@ -303,11 +305,17 @@ public class AIInsightsController : ControllerBase
                     tickerIds.Count,
                     jobId);
 
-                await service.GenerateInsightsBatchAsync(tickerIds, CancellationToken.None);
+                var result = await service.GenerateInsightsBatchAsync(tickerIds, CancellationToken.None);
+
+                await cacheService.RemoveByPatternAsync(cacheKeyGenerator.GeneratePattern("insights"));
+                await cacheService.RemoveAsync(cacheKeyGenerator.GenerateMarketSentimentKey());
 
                 logger.LogInformation(
-                    "Background AI insight batch generation completed (job={JobId})",
-                    jobId);
+                    "Background AI insight batch generation completed (job={JobId}, success={Success}, failed={Failed}, total={Total})",
+                    jobId,
+                    result.SuccessCount,
+                    result.FailedCount,
+                    result.TotalCount);
             }
             catch (Exception ex)
             {

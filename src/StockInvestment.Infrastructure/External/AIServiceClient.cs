@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Application.Contracts.AI;
 using StockInvestment.Application.DTOs.Common;
+using StockInvestment.Shared;
 using System.Net;
 using System.Text.Json.Serialization;
 
@@ -38,7 +39,7 @@ public partial class AIServiceClient : IAIService
 
         if (DateTime.TryParse(generatedAt, out var parsedDate))
         {
-            return parsedDate;
+            return DateTimeUtcHelper.ToUtc(parsedDate);
         }
 
         // If parsing fails, return current time

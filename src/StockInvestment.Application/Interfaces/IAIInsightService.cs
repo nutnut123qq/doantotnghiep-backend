@@ -22,7 +22,7 @@ public interface IAIInsightService
         Dictionary<string, string>? sentimentData = null,
         CancellationToken cancellationToken = default);
 
-    Task<IEnumerable<AIInsight>> GenerateInsightsBatchAsync(
+    Task<GenerateInsightsBatchResult> GenerateInsightsBatchAsync(
         IEnumerable<Guid> tickerIds,
         CancellationToken cancellationToken = default);
 

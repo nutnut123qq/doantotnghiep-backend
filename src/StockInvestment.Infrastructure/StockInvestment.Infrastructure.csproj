@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\StockInvestment.Domain\StockInvestment.Domain.csproj" />
     <ProjectReference Include="..\StockInvestment.Application\StockInvestment.Application.csproj" />
+    <ProjectReference Include="..\StockInvestment.Shared\StockInvestment.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

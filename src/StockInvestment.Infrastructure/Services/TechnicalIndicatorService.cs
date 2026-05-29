@@ -3,6 +3,7 @@ using StockInvestment.Application.DTOs.StockData;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Constants;
 using StockInvestment.Domain.Entities;
+using StockInvestment.Shared;
 
 namespace StockInvestment.Infrastructure.Services;
 
@@ -406,7 +407,7 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
                 var entities = data.Select(d => new StockPrice
                 {
                     Symbol = normalizedSymbol,
-                    Date = d.Date.Date,
+                    Date = DateTimeUtcHelper.ToUtcDate(d.Date),
                     Open = d.Open,
                     High = d.High,
                     Low = d.Low,
@@ -425,6 +426,7 @@ public class TechnicalIndicatorService : ITechnicalIndicatorService
                 }
                 catch (Exception ex)
                 {
+                    _unitOfWork.ClearChangeTracker();
                     // Non-fatal: still return data even if persistence fails
                     _logger.LogWarning(ex,
                         "Failed to persist historical prices for {Symbol} to DB; returning data anyway",

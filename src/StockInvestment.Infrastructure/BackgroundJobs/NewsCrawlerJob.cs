@@ -1,11 +1,14 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StockInvestment.Application.Interfaces;
+using StockInvestment.Domain.Constants;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Infrastructure.Configuration;
+using StockInvestment.Infrastructure.Data;
 using StockInvestment.Infrastructure.Services;
 
 namespace StockInvestment.Infrastructure.BackgroundJobs;
@@ -16,6 +19,8 @@ namespace StockInvestment.Infrastructure.BackgroundJobs;
 /// </summary>
 public class NewsCrawlerJob : BackgroundService
 {
+    private static int _vn30RotationIndex;
+
     private readonly ILogger<NewsCrawlerJob> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
@@ -62,84 +67,106 @@ public class NewsCrawlerJob : BackgroundService
     private async Task CrawlNewsAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceProvider.CreateScope();
-        
-        // P1-2: Acquire distributed lock
+
         var distributedLock = await JobLockHelper.TryAcquireLockAsync(
             scope, _configuration, _logger, "news-crawler", TimeSpan.FromHours(1), cancellationToken);
-        
+
         if (distributedLock == null)
-        {
-            return; // Lock not acquired or disabled
-        }
+            return;
 
         try
         {
             var newsCrawlerService = scope.ServiceProvider.GetRequiredService<INewsCrawlerService>();
             var newsService = scope.ServiceProvider.GetRequiredService<INewsService>();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
             _logger.LogInformation("Starting news crawl...");
 
-            // Crawl news from all sources
+            var tickers = await dbContext.StockTickers.AsNoTracking().ToListAsync(cancellationToken);
+            var tickerMap = NewsTickerResolver.BuildTickerMap(tickers);
+            var aliasMap = NewsTickerResolver.BuildTickerNameAliasMap(tickers);
+            var symbolToTicker = tickers
+                .Where(t => !string.IsNullOrWhiteSpace(t.Symbol))
+                .ToDictionary(t => t.Symbol.Trim().ToUpperInvariant(), t => t, StringComparer.OrdinalIgnoreCase);
+
+            var newsList = new List<News>();
+
             var maxPerRun = Math.Clamp(_ingestionOptions.MaxArticlesPerRun, 1, 500);
-            var newsItems = await newsCrawlerService.CrawlNewsAsync(maxArticles: maxPerRun);
-            var newsList = newsItems.ToList();
+            var generalItems = (await newsCrawlerService.CrawlNewsAsync(maxArticles: maxPerRun)).ToList();
+            newsList.AddRange(generalItems);
+            _logger.LogInformation("Crawled {Count} general news items", generalItems.Count);
+
+            if (_ingestionOptions.SymbolCrawlEnabled)
+            {
+                var symbolItems = await CrawlVn30SymbolNewsAsync(
+                    newsCrawlerService,
+                    symbolToTicker,
+                    cancellationToken);
+                newsList.AddRange(symbolItems);
+                _logger.LogInformation("Crawled {Count} symbol-specific news items", symbolItems.Count);
+            }
 
             if (!newsList.Any())
             {
-                _logger.LogWarning("No news items crawled");
-                return;
+                _logger.LogWarning("No news items crawled (general + symbol)");
             }
-
-            _logger.LogInformation("Crawled {Count} news items", newsList.Count);
-
-            // Load existing URLs once into HashSet for efficient duplicate checking
-            var existingUrls = await newsService.GetExistingUrlsAsync();
-            var existingFingerprints = await newsService.GetExistingFingerprintsAsync();
-            _logger.LogInformation("Loaded {Count} existing URLs for duplicate check", existingUrls.Count);
-
-            // Check for duplicates before adding to database
-            var addedCount = 0;
-            var newsToAdd = new List<News>();
-
-            foreach (var news in newsList)
+            else
             {
-                try
+                NewsTickerResolver.ApplyTickerTags(newsList, tickerMap, aliasMap);
+
+                var existingUrls = await newsService.GetExistingUrlsAsync();
+                var existingFingerprints = await newsService.GetExistingFingerprintsAsync();
+                _logger.LogInformation("Loaded {Count} existing URLs for duplicate check", existingUrls.Count);
+
+                var newsToAdd = new List<News>();
+                foreach (var news in newsList)
                 {
-                    var canonicalUrl = CanonicalizeUrl(news.Url);
-                    var fingerprint = NewsService.BuildFingerprint(news.Title, news.Source, news.PublishedAt);
+                    try
+                    {
+                        var canonicalUrl = CanonicalizeUrl(news.Url);
+                        var fingerprint = NewsService.BuildFingerprint(news.Title, news.Source, news.PublishedAt);
 
-                    // Skip if URL/fingerprint already exists
-                    if ((!string.IsNullOrWhiteSpace(canonicalUrl) && existingUrls.Contains(canonicalUrl))
-                        || (!string.IsNullOrWhiteSpace(fingerprint) && existingFingerprints.Contains(fingerprint)))
-                    {
-                        continue;
-                    }
+                        if ((!string.IsNullOrWhiteSpace(canonicalUrl) && existingUrls.Contains(canonicalUrl))
+                            || (!string.IsNullOrWhiteSpace(fingerprint) && existingFingerprints.Contains(fingerprint)))
+                        {
+                            continue;
+                        }
 
-                    // Mark dedupe keys as seen to avoid duplicates within the same batch
-                    if (!string.IsNullOrWhiteSpace(canonicalUrl))
-                    {
-                        news.Url = canonicalUrl;
-                        existingUrls.Add(canonicalUrl);
+                        if (!string.IsNullOrWhiteSpace(canonicalUrl))
+                        {
+                            news.Url = canonicalUrl;
+                            existingUrls.Add(canonicalUrl);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(fingerprint))
+                            existingFingerprints.Add(fingerprint);
+
+                        newsToAdd.Add(news);
                     }
-                    if (!string.IsNullOrWhiteSpace(fingerprint))
+                    catch (Exception ex)
                     {
-                        existingFingerprints.Add(fingerprint);
+                        _logger.LogWarning(ex, "Error processing news item: {Title}", news.Title);
                     }
-                    newsToAdd.Add(news);
                 }
-                catch (Exception ex)
+
+                if (newsToAdd.Any())
                 {
-                    _logger.LogWarning(ex, "Error processing news item: {Title}", news.Title);
+                    await newsService.AddNewsRangeAsync(newsToAdd);
+                    _logger.LogInformation("Successfully added {Count} new news items to database", newsToAdd.Count);
+                }
+                else
+                {
+                    _logger.LogInformation("No new news items to add after dedupe");
                 }
             }
 
-            // Batch add all new news items
-            if (newsToAdd.Any())
+            if (_ingestionOptions.BackfillTickerIdsEnabled)
             {
-                await newsService.AddNewsRangeAsync(newsToAdd);
-                addedCount = newsToAdd.Count;
+                var batchSize = Math.Clamp(_ingestionOptions.BackfillTickerIdsBatchSize, 1, 5000);
+                var backfilled = await newsService.BackfillTickerIdsAsync(batchSize, cancellationToken);
+                if (backfilled > 0)
+                    _logger.LogInformation("Backfilled TickerId on {Count} existing news rows", backfilled);
             }
-
-            _logger.LogInformation("Successfully added {Count} new news items to database", addedCount);
         }
         catch (Exception ex)
         {
@@ -147,7 +174,6 @@ public class NewsCrawlerJob : BackgroundService
         }
         finally
         {
-            // P1-2: Release distributed lock
             if (distributedLock != null)
             {
                 await distributedLock.ReleaseAsync();
@@ -156,17 +182,62 @@ public class NewsCrawlerJob : BackgroundService
         }
     }
 
+    private async Task<List<News>> CrawlVn30SymbolNewsAsync(
+        INewsCrawlerService newsCrawlerService,
+        IReadOnlyDictionary<string, StockTicker> symbolToTicker,
+        CancellationToken cancellationToken)
+    {
+        var perRun = Math.Clamp(_ingestionOptions.Vn30SymbolsPerRun, 1, Vn30Universe.Symbols.Count);
+        var maxPerSymbol = Math.Clamp(_ingestionOptions.MaxArticlesPerSymbol, 1, 20);
+        var symbols = SelectVn30Symbols(perRun);
+        var results = new List<News>();
+
+        foreach (var symbol in symbols)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var items = (await newsCrawlerService.CrawlNewsBySymbolAsync(symbol, maxPerSymbol)).ToList();
+                if (symbolToTicker.TryGetValue(symbol, out var ticker))
+                {
+                    foreach (var news in items)
+                        news.TickerId = ticker.Id;
+                }
+
+                results.AddRange(items);
+                _logger.LogDebug("Symbol crawl {Symbol}: {Count} items", symbol, items.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Symbol crawl failed for {Symbol}", symbol);
+            }
+        }
+
+        return results;
+    }
+
+    internal static IReadOnlyList<string> SelectVn30Symbols(int count)
+    {
+        var all = Vn30Universe.Symbols;
+        if (all.Count == 0)
+            return Array.Empty<string>();
+
+        count = Math.Clamp(count, 1, all.Count);
+        var result = new List<string>(count);
+        for (var i = 0; i < count; i++)
+            result.Add(all[(_vn30RotationIndex + i) % all.Count]);
+
+        _vn30RotationIndex = (_vn30RotationIndex + count) % all.Count;
+        return result;
+    }
+
     private static string? CanonicalizeUrl(string? rawUrl)
     {
         if (string.IsNullOrWhiteSpace(rawUrl))
-        {
             return null;
-        }
 
         if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri))
-        {
             return rawUrl.Trim();
-        }
 
         var builder = new UriBuilder(uri)
         {
@@ -196,4 +267,3 @@ public class NewsCrawlerJob : BackgroundService
         return builder.Uri.AbsoluteUri.TrimEnd('/');
     }
 }
-

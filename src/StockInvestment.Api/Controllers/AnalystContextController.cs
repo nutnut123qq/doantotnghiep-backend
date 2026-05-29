@@ -53,7 +53,7 @@ public class AnalystContextController : ControllerBase
     public async Task<IActionResult> GetNewsContext(
         [FromQuery] string symbol,
         [FromQuery] int topK = 8,
-        [FromQuery] int days = 7,
+        [FromQuery] int days = 14,
         CancellationToken cancellationToken = default)
     {
         if (!TryValidateInternalKey())

@@ -28,6 +28,21 @@ public sealed class NewsIngestionOptions
     /// When null or empty, no URL-based filtering is applied.
     /// </summary>
     public List<string> BlockedUrlPathSegments { get; set; } = new();
+
+    /// <summary>When true, rotate through VN30 symbols and crawl symbol-specific news each run.</summary>
+    public bool SymbolCrawlEnabled { get; set; } = true;
+
+    /// <summary>Number of VN30 symbols to crawl per job run (CafeF + VietStock search).</summary>
+    public int Vn30SymbolsPerRun { get; set; } = 6;
+
+    /// <summary>Max articles per symbol from symbol-specific crawl sources.</summary>
+    public int MaxArticlesPerSymbol { get; set; } = 5;
+
+    /// <summary>When true, backfill TickerId on untagged news rows each crawl run.</summary>
+    public bool BackfillTickerIdsEnabled { get; set; } = true;
+
+    /// <summary>Batch size for TickerId backfill per crawl run.</summary>
+    public int BackfillTickerIdsBatchSize { get; set; } = 500;
 }
 
 /// <summary>

@@ -23,4 +23,9 @@ public interface INewsService
     Task<HashSet<string>> GetExistingUrlsAsync();
     Task<HashSet<string>> GetExistingFingerprintsAsync();
     Task<QuestionAnswerResult> AskQuestionAsync(string? symbol, string question, int days = 7, int topK = 6);
+
+    /// <summary>
+    /// Assign TickerId to untagged news rows using symbol/alias resolution. Returns rows updated.
+    /// </summary>
+    Task<int> BackfillTickerIdsAsync(int batchSize = 500, CancellationToken cancellationToken = default);
 }

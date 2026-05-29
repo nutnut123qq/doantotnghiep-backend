@@ -55,6 +55,19 @@ public class AdminNewsController : ControllerBase
 
         return NoContent();
     }
+
+    /// <summary>
+    /// Backfill TickerId on news rows that lack symbol tagging.
+    /// </summary>
+    [HttpPost("backfill-ticker-ids")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> BackfillTickerIds(
+        [FromQuery] int batchSize = 500,
+        CancellationToken cancellationToken = default)
+    {
+        var updated = await _newsService.BackfillTickerIdsAsync(batchSize, cancellationToken);
+        return Ok(new { updated });
+    }
 }
 
 public class SetNewsDeletedRequest

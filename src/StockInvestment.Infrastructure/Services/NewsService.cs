@@ -81,7 +81,7 @@ public class NewsService : INewsService
 
     public async Task<IReadOnlyList<NewsItemDto>> GetRecentNewsForSymbolAsync(string symbol, int days = 7, int limit = 5)
     {
-        var normalizedSymbol = symbol.ToUpperInvariant();
+        var normalizedSymbol = symbol.Trim().ToUpperInvariant();
         var ticker = await _context.StockTickers
             .FirstOrDefaultAsync(t => t.Symbol == normalizedSymbol);
 
@@ -92,19 +92,20 @@ public class NewsService : INewsService
         }
 
         var sinceDate = DateTime.UtcNow.AddDays(-days);
-        var pattern = $"%{normalizedSymbol}%";
-        var newsList = await _context.News
+        var searchPhrases = NewsTickerResolver.GetSearchPhrasesForTicker(ticker);
+
+        var candidates = await _context.News
             .Where(n => !n.IsDeleted)
             .Where(n => n.PublishedAt >= sinceDate)
-            .Where(n =>
-                n.TickerId == ticker.Id
-                || (n.TickerId == null
-                    && (EF.Functions.ILike(n.Title, pattern)
-                        || EF.Functions.ILike(n.Content, pattern)
-                        || (n.Summary != null && EF.Functions.ILike(n.Summary, pattern)))))
+            .Where(n => n.TickerId == ticker.Id || n.TickerId == null)
             .OrderByDescending(n => n.PublishedAt)
-            .Take(limit)
+            .Take(Math.Clamp(limit * 8, limit, 80))
             .ToListAsync();
+
+        var newsList = candidates
+            .Where(n => MatchesSymbolNews(n, ticker.Id, normalizedSymbol, searchPhrases))
+            .Take(limit)
+            .ToList();
 
         return newsList.Select(n => new NewsItemDto
         {
@@ -114,6 +115,106 @@ public class NewsService : INewsService
             Url = n.Url,
             Summary = n.Summary ?? n.Content
         }).ToList();
+    }
+
+    public async Task<int> BackfillTickerIdsAsync(int batchSize = 500, CancellationToken cancellationToken = default)
+    {
+        batchSize = Math.Clamp(batchSize, 1, 5000);
+
+        var tickers = await _context.StockTickers.AsNoTracking().ToListAsync(cancellationToken);
+        if (tickers.Count == 0)
+            return 0;
+
+        var tickerMap = NewsTickerResolver.BuildTickerMap(tickers);
+        var aliasMap = NewsTickerResolver.BuildTickerNameAliasMap(tickers);
+
+        var batch = await _context.News
+            .Where(n => !n.IsDeleted && n.TickerId == null)
+            .OrderByDescending(n => n.PublishedAt)
+            .Take(batchSize)
+            .ToListAsync(cancellationToken);
+
+        var updated = 0;
+        foreach (var news in batch)
+        {
+            if (!NewsTickerResolver.TryResolveTickerId(news, tickerMap, aliasMap, out var tickerId))
+                continue;
+
+            news.TickerId = tickerId;
+            updated++;
+        }
+
+        if (updated > 0)
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Backfilled TickerId on {Count} news rows", updated);
+        }
+
+        return updated;
+    }
+
+    private static bool MatchesSymbolNews(
+        News news,
+        Guid tickerId,
+        string normalizedSymbol,
+        IReadOnlyList<string> searchPhrases)
+    {
+        if (news.TickerId == tickerId)
+            return true;
+
+        if (news.TickerId.HasValue)
+            return false;
+
+        var combined = NewsTickerResolver.CombineNewsText(news);
+        if (string.IsNullOrWhiteSpace(combined))
+            return false;
+
+        var upper = combined.ToUpperInvariant();
+        if (ContainsSymbolToken(upper, normalizedSymbol))
+            return true;
+
+        var normalizedCombined = NormalizeForSearch(combined);
+        foreach (var phrase in searchPhrases)
+        {
+            if (phrase.Equals(normalizedSymbol, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var normalizedPhrase = NormalizeForSearch(phrase);
+            if (normalizedPhrase.Length >= 6
+                && normalizedCombined.Contains(normalizedPhrase, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsSymbolToken(string upperCombined, string symbol)
+    {
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                     upperCombined,
+                     @"\b([A-Z]{3,5})\b"))
+        {
+            if (m.Groups[1].Value.Equals(symbol, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string NormalizeForSearch(string text)
+    {
+        var lower = text.ToLowerInvariant();
+        var sb = new System.Text.StringBuilder(lower.Length);
+        foreach (var ch in lower.Normalize(System.Text.NormalizationForm.FormD))
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch)
+                != System.Globalization.UnicodeCategory.NonSpacingMark)
+                sb.Append(ch);
+        }
+
+        return System.Text.RegularExpressions.Regex
+            .Replace(sb.ToString().Normalize(System.Text.NormalizationForm.FormC), @"[\p{P}\p{S}\s]+", " ")
+            .Trim();
     }
 
     public Task RequestSummarizationAsync(Guid newsId)

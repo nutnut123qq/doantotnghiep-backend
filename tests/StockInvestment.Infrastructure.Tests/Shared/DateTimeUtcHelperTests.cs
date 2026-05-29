@@ -25,4 +25,14 @@ public class DateTimeUtcHelperTests
 
         Assert.Equal(DateTimeKind.Utc, result.Kind);
     }
+
+    [Fact]
+    public void FormatInTimeZone_ConvertsUtcToVietnamTime()
+    {
+        var utc = new DateTime(2026, 5, 29, 15, 13, 38, DateTimeKind.Utc);
+
+        var result = DateTimeUtcHelper.FormatInTimeZone(utc);
+
+        Assert.Equal("2026-05-29 22:13:38", result);
+    }
 }

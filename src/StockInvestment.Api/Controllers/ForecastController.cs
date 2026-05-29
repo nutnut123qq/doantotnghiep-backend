@@ -20,7 +20,6 @@ public class ForecastController : ControllerBase
     private readonly ITechnicalDataService _technicalDataService;
     private readonly ILogger<ForecastController> _logger;
     private readonly ICacheService _cacheService;
-    private readonly ICacheKeyGenerator _cacheKeyGenerator;
     private readonly IOptions<StockAnalystOptions> _stockAnalystOptions;
     private readonly ILangGraphForecastClient _langGraphForecastClient;
     private readonly ILangGraphForecastMapper _langGraphForecastMapper;
@@ -31,7 +30,6 @@ public class ForecastController : ControllerBase
         ITechnicalDataService technicalDataService,
         ILogger<ForecastController> logger,
         ICacheService cacheService,
-        ICacheKeyGenerator cacheKeyGenerator,
         IOptions<StockAnalystOptions> stockAnalystOptions,
         ILangGraphForecastClient langGraphForecastClient,
         ILangGraphForecastMapper langGraphForecastMapper,
@@ -41,7 +39,6 @@ public class ForecastController : ControllerBase
         _technicalDataService = technicalDataService;
         _logger = logger;
         _cacheService = cacheService;
-        _cacheKeyGenerator = cacheKeyGenerator;
         _stockAnalystOptions = stockAnalystOptions;
         _langGraphForecastClient = langGraphForecastClient;
         _langGraphForecastMapper = langGraphForecastMapper;
@@ -76,15 +73,6 @@ public class ForecastController : ControllerBase
             if (_stockAnalystOptions.Value.Enabled)
             {
                 return await GetForecastViaLangGraphAsync(symbol, timeHorizon, cancellationToken);
-            }
-
-            // Check cache first (cache for 4 hours to optimize quota usage)
-            var cacheKey = _cacheKeyGenerator.GenerateForecastKey(symbol, timeHorizon);
-            var cachedForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-            if (cachedForecast != null)
-            {
-                _logger.LogDebug("Returning cached forecast for {Symbol} with timeHorizon {TimeHorizon}", symbol, timeHorizon);
-                return Ok(cachedForecast);
             }
 
             // Collect real technical indicators data
@@ -165,9 +153,6 @@ public class ForecastController : ControllerBase
                 });
             }
 
-            // Cache the forecast result for 4 hours
-            await _cacheService.SetAsync(cacheKey, forecast, TimeSpan.FromHours(4));
-            
             return Ok(forecast);
         }
         catch (HttpRequestException httpEx) when (ExtractStatusCode(httpEx) == 404)
@@ -183,22 +168,13 @@ public class ForecastController : ControllerBase
         catch (HttpRequestException httpEx) when (ExtractStatusCode(httpEx) == 429)
         {
             _logger.LogWarning(httpEx, "Quota exceeded (429) for {Symbol}", symbol);
-            
-            // Try to return cached forecast if available
-            var cacheKey = $"forecast:{symbol}:{timeHorizon}";
-            var cachedForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-            if (cachedForecast != null)
-            {
-                _logger.LogInformation("Returning cached forecast for {Symbol} due to quota exceeded", symbol);
-                return Ok(cachedForecast);
-            }
-            
+
             return StatusCode(429, new
             {
                 error = "Quota exceeded",
                 message = "Đã vượt quá giới hạn quota Gemini API (20 requests/ngày). Vui lòng thử lại sau ít phút hoặc nâng cấp plan để tăng quota.",
                 symbol = symbol,
-                details = "Gemini API free tier có giới hạn 20 requests/ngày. Forecast được cache trong 4 giờ để tối ưu sử dụng quota."
+                details = "Gemini API free tier có giới hạn 20 requests/ngày."
             });
         }
         catch (HttpRequestException httpEx) when (ExtractStatusCode(httpEx) == 500)
@@ -207,19 +183,7 @@ public class ForecastController : ControllerBase
             var isQuotaError = httpEx.Message.Contains("429") || httpEx.Message.Contains("quota") || httpEx.Message.Contains("Quota exceeded");
             
             _logger.LogError(httpEx, "AI service returned 500 error for {Symbol}. IsQuotaError: {IsQuotaError}", symbol, isQuotaError);
-            
-            // Check cache as fallback for quota errors
-            if (isQuotaError)
-            {
-                var cacheKey = _cacheKeyGenerator.GenerateForecastKey(symbol, timeHorizon);
-                var cachedForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-                if (cachedForecast != null)
-                {
-                    _logger.LogInformation("Returning cached forecast for {Symbol} due to quota exceeded", symbol);
-                    return Ok(cachedForecast);
-                }
-            }
-            
+
             return StatusCode(isQuotaError ? 429 : 500, new
             {
                 error = isQuotaError ? "Quota exceeded" : "AI service error",
@@ -228,7 +192,7 @@ public class ForecastController : ControllerBase
                     : $"Lỗi từ AI service: {errorMessage}",
                 symbol = symbol,
                 details = isQuotaError 
-                    ? "Gemini API free tier có giới hạn 20 requests/ngày. Forecast được cache trong 4 giờ."
+                    ? "Gemini API free tier có giới hạn 20 requests/ngày."
                     : "This may be a Gemini API configuration issue. Please check AI service logs."
             });
         }
@@ -240,17 +204,6 @@ public class ForecastController : ControllerBase
         string timeHorizon,
         CancellationToken cancellationToken)
     {
-        var cacheKey = _cacheKeyGenerator.GenerateLangGraphForecastKey(symbol, timeHorizon);
-        var cached = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-        if (cached != null)
-        {
-            _logger.LogDebug(
-                "Returning cached LangGraph forecast for {Symbol} timeHorizon {TimeHorizon}",
-                symbol,
-                timeHorizon);
-            return Ok(cached);
-        }
-
         // Spawn the long-running LangGraph analysis in a background task
         // so the HTTP response returns immediately (202) while Beeknoee
         // processes the 8-node pipeline without holding the request open.
@@ -282,7 +235,6 @@ public class ForecastController : ControllerBase
                 if (response != null)
                 {
                     var forecast = mapper.Map(response, symbol, timeHorizon);
-                    await cache.SetAsync(cacheKey, forecast, TimeSpan.FromHours(8));
 
                     jobState.Status = "completed";
                     jobState.Result = forecast;
@@ -369,8 +321,6 @@ public class ForecastController : ControllerBase
             return BadRequest(new { error = "symbol query param is required" });
         }
 
-        var cacheKey = _cacheKeyGenerator.GenerateLangGraphForecastKey(symbol, timeHorizon);
-
         // 1. Check our inline background-job state first (no external RQ worker needed).
         var jobState = await _cacheService.GetAsync<LangGraphJobState>($"forecast_job:v3:{jobId}");
         if (jobState != null && !string.IsNullOrWhiteSpace(jobState.Status))
@@ -379,7 +329,6 @@ public class ForecastController : ControllerBase
 
             if (stateStatus == "completed" && jobState.Result != null)
             {
-                await _cacheService.SetAsync(cacheKey, jobState.Result, TimeSpan.FromHours(8));
                 return Ok(jobState.Result);
             }
 
@@ -390,13 +339,6 @@ public class ForecastController : ControllerBase
                     jobId,
                     symbol,
                     jobState.Error);
-
-                var staleForecast = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-                if (staleForecast != null)
-                {
-                    _logger.LogWarning("Returning stale LangGraph cache for {Symbol} after job failure", symbol);
-                    return Ok(staleForecast);
-                }
 
                 return StatusCode(500, new
                 {
@@ -415,14 +357,6 @@ public class ForecastController : ControllerBase
                 symbol,
                 timeHorizon
             });
-        }
-
-        // 2. Fallback to stale cache if the job state expired but a result exists.
-        var stale = await _cacheService.GetAsync<ForecastResult>(cacheKey);
-        if (stale != null)
-        {
-            _logger.LogInformation("LangGraph job {JobId} state expired; returning stale cache for {Symbol}", jobId, symbol);
-            return Ok(stale);
         }
 
         return StatusCode(404, new
@@ -495,7 +429,7 @@ public class ForecastController : ControllerBase
                 // Check for specific quota error in detail
                 if (message.Contains("429") || message.Contains("quota") || message.Contains("Quota exceeded"))
                 {
-                    return "Đã vượt quá giới hạn quota Gemini API (20 requests/ngày). Dự báo đã được cache, vui lòng thử lại sau ít phút.";
+                    return "Đã vượt quá giới hạn quota Gemini API (20 requests/ngày). Vui lòng thử lại sau ít phút.";
                 }
                 return "Lỗi Gemini API: " + message;
             }

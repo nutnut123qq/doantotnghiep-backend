@@ -4,6 +4,7 @@ using StockInvestment.Application.Contracts.Notifications;
 using StockInvestment.Application.Interfaces;
 using StockInvestment.Domain.Entities;
 using StockInvestment.Domain.Enums;
+using StockInvestment.Shared;
 using System.Globalization;
 
 namespace StockInvestment.Infrastructure.Services;
@@ -155,7 +156,7 @@ public class NotificationChannelService : INotificationChannelService
             { "Operator", context.Operator },  // Use directly
             { "Threshold", FormatAlertMetric(context.Alert.Type, context.Alert.Threshold, isStoredAsThousandVnd: true) },
             { "CurrentValue", FormatAlertMetric(context.Alert.Type, context.CurrentValue, isStoredAsThousandVnd: false) },
-            { "Time", context.TriggeredAt.ToString("yyyy-MM-dd HH:mm:ss") },
+            { "Time", DateTimeUtcHelper.FormatInTimeZone(context.TriggeredAt) },
             { "AiExplanation", string.Empty }
         };
 
@@ -251,7 +252,7 @@ public class NotificationChannelService : INotificationChannelService
         var currentValue = FormatAlertMetric(context.Alert.Type, context.CurrentValue, isStoredAsThousandVnd: false);
         var alertType = context.Alert.Type.ToString();
 
-        return $"[{alertType}] {symbol} triggered: Current {currentValue} {context.Operator} Threshold {threshold} at {context.TriggeredAt:yyyy-MM-dd HH:mm:ss}";
+        return $"[{alertType}] {symbol} triggered: Current {currentValue} {context.Operator} Threshold {threshold} at {DateTimeUtcHelper.FormatInTimeZone(context.TriggeredAt)}";
     }
 
     private static string FormatAlertMetric(AlertType alertType, decimal? value, bool isStoredAsThousandVnd = true)

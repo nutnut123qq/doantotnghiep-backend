@@ -253,7 +253,7 @@ public class ForecastController : ControllerBase
 
         // Spawn the long-running LangGraph analysis in a background task
         // so the HTTP response returns immediately (202) while Beeknoee
-        // processes the 10-node pipeline without holding the request open.
+        // processes the 8-node pipeline without holding the request open.
         var jobId = Guid.NewGuid().ToString("N");
         var jobState = new LangGraphJobState
         {

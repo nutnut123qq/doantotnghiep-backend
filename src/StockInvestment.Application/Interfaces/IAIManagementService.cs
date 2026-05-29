@@ -48,7 +48,6 @@ public sealed class AiProbeItem
 
 public sealed class AiPipelineDto
 {
-    public bool LightMode { get; set; }
     public string Provider { get; set; } = string.Empty;
     public List<AiPipelineNode> Nodes { get; set; } = new();
     public List<AiPipelineEdge> Edges { get; set; } = new();
@@ -118,7 +117,6 @@ public sealed class AiParametersDto
     public double CanaryRatio { get; set; }
     public string LlmProvider { get; set; } = string.Empty;
     public string DefaultModel { get; set; } = string.Empty;
-    public string? LightModeEnv { get; set; }
 }
 
 public sealed class AiParametersUpdateDto

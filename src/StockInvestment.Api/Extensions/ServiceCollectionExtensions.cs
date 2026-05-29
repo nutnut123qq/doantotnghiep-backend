@@ -533,7 +533,6 @@ public static class ServiceCollectionExtensions
 
         // Register IAIService to use AIServiceClient
         services.AddScoped<IAIService>(sp => sp.GetRequiredService<AIServiceClient>());
-        services.AddScoped<IAIManagementService>(sp => sp.GetRequiredService<AIServiceClient>());
 
         // LangGraph Stock Analyst (Python ai /api/analyze) — optional; used when StockAnalyst:Enabled
         services.AddHttpClient<LangGraphForecastClient>((serviceProvider, client) =>
